@@ -1,9 +1,13 @@
 //
 //  BRLights.m — square traffic-light buttons (formerly FlatLights).
 //
-//  Per-instance isa-swizzles ONLY a window's three standard control buttons and
-//  repaints them as squares with configurable colours + a hover glyph. Reads the
-//  shared config cache; the core arms the swizzle group and drives discovery.
+//  Repaints a window's three standard control buttons as squares with
+//  configurable colours + a hover glyph. Done with a ONE-TIME class-level method
+//  swizzle of the three private widget classes (_NSThemeCloseWidget / _NSThemeWidget
+//  / _NSThemeZoomWidget) — never a per-instance isa change, so it coexists with
+//  the NSKVONotifying_ subclasses and Swift property system AppKit puts on these
+//  buttons under Solarium. Reads the shared config cache; the core arms the
+//  swizzle and drives per-window discovery (hover + prompt repaint).
 //
 
 #import <AppKit/AppKit.h>
@@ -144,9 +148,32 @@ static void FLDraw(NSButton *btn, FLType type) {
     FLDrawContent(btn, type, FLHoverForWindow(btn.window), btn.bounds);
 }
 
-#pragma mark - Per-instance install (scoped — never touches NSButton globally)
+#pragma mark - Class-level install (no isa changes — KVO / Swift-cast safe)
 
-static Class FLSuperOf(id self);
+// We method-swizzle the three private window-button classes ONCE, instead of
+// per-instance isa-swizzling. Under Solarium AppKit installs an NSKVONotifying_
+// subclass on these buttons and drives the titlebar through a Swift property
+// system; reclassing an instance clobbers that chain and crashes the next
+// titlebar update in swift_dynamicCast. Leaving every instance's isa untouched
+// keeps KVO and the Swift cast happy. The captured original IMP is called
+// through when the feature is off or the view isn't a standard window button.
+
+typedef struct { Class cls; IMP origDraw; IMP origUpdate; } FLEntry;
+static FLEntry gFLEntries[4];
+static int     gFLEntryCount = 0;
+
+static FLEntry *FLEntryForClass(Class c) {
+    for (int i = 0; i < gFLEntryCount; i++) if (gFLEntries[i].cls == c) return &gFLEntries[i];
+    return NULL;
+}
+static FLEntry *FLEntryForInstance(id self) {
+    // self's class is the NSKVONotifying_ subclass; walk up to our swizzled class.
+    for (Class c = object_getClass(self); c; c = class_getSuperclass(c)) {
+        FLEntry *e = FLEntryForClass(c);
+        if (e) return e;
+    }
+    return NULL;
+}
 
 static void FLDrawRectIMP(id self, SEL _cmd, NSRect dirty) {
     BOOL handled = NO;
@@ -157,8 +184,8 @@ static void FLDrawRectIMP(id self, SEL _cmd, NSRect dirty) {
         } @catch (__unused NSException *e) { handled = NO; }
     }
     if (!handled) {
-        struct objc_super sup = { self, FLSuperOf(self) };
-        ((void (*)(struct objc_super *, SEL, NSRect))objc_msgSendSuper)(&sup, _cmd, dirty);
+        FLEntry *e = FLEntryForInstance(self);
+        if (e && e->origDraw) ((void (*)(id, SEL, NSRect))e->origDraw)(self, _cmd, dirty);
     }
 }
 
@@ -178,14 +205,6 @@ static void FLDrawLayer(NSButton *btn, FLType type) {
     for (CALayer *s in host.sublayers) s.hidden = YES;
 }
 
-static Class FLSuperOf(id self) {
-    Class flClass = object_getClass(self);
-    while (flClass && strncmp(class_getName(flClass), "FL_", 3) != 0) {
-        flClass = class_getSuperclass(flClass);
-    }
-    return class_getSuperclass(flClass ? flClass : object_getClass(self));
-}
-
 static void FLUpdateLayerIMP(id self, SEL _cmd) {
     BOOL handled = NO;
     if (BRLightsActive() && [NSThread isMainThread]) {
@@ -198,34 +217,36 @@ static void FLUpdateLayerIMP(id self, SEL _cmd) {
         CALayer *host = ((NSView *)self).layer;
         host.contents = nil;
         for (CALayer *s in host.sublayers) s.hidden = NO;
-        struct objc_super sup = { self, FLSuperOf(self) };
-        ((void (*)(struct objc_super *, SEL))objc_msgSendSuper)(&sup, _cmd);
+        FLEntry *e = FLEntryForInstance(self);
+        if (e && e->origUpdate) ((void (*)(id, SEL))e->origUpdate)(self, _cmd);
     }
 }
 
-static Class FLSubclassFor(Class orig) {
-    char name[256];
-    snprintf(name, sizeof(name), "FL_%s", class_getName(orig));
-    Class sub = objc_getClass(name);
-    if (sub) return sub;
-    sub = objc_allocateClassPair(orig, name, 0);
-    if (!sub) return Nil;
-    Method m = class_getInstanceMethod(orig, @selector(drawRect:));
-    const char *types = m ? method_getTypeEncoding(m)
-                          : "v@:{CGRect={CGPoint=dd}{CGSize=dd}}";
-    class_addMethod(sub, @selector(drawRect:),   (IMP)FLDrawRectIMP,    types);
-    class_addMethod(sub, @selector(updateLayer), (IMP)FLUpdateLayerIMP, "v@:");
-    objc_registerClassPair(sub);
-    return sub;
-}
+// Swizzle drawRect:/updateLayer on one widget class, scoped to that class only
+// (never its superclass). Call on derived classes BEFORE base classes so a
+// derived class never captures our own IMP as its "original".
+static void FLSwizzleClass(const char *clsName) {
+    Class cls = objc_getClass(clsName);
+    if (!cls || FLEntryForClass(cls) ||
+        gFLEntryCount >= (int)(sizeof(gFLEntries) / sizeof(gFLEntries[0]))) return;
+    FLEntry *e = &gFLEntries[gFLEntryCount];
+    e->cls = cls;
 
-static BOOL FLInstallOnButton(NSButton *btn) {
-    if (!btn || ![NSThread isMainThread]) return NO;
-    Class cur = object_getClass(btn);
-    if (strncmp(class_getName(cur), "FL_", 3) == 0) return NO;
-    Class sub = FLSubclassFor(cur);
-    if (sub && sub != cur) { object_setClass(btn, sub); return YES; }
-    return NO;
+    Method dm = class_getInstanceMethod(cls, @selector(drawRect:));
+    e->origDraw = dm ? method_getImplementation(dm) : NULL;
+    const char *dtypes = dm ? method_getTypeEncoding(dm) : "v@:{CGRect={CGPoint=dd}{CGSize=dd}}";
+    if (!class_addMethod(cls, @selector(drawRect:), (IMP)FLDrawRectIMP, dtypes))
+        e->origDraw = method_setImplementation(class_getInstanceMethod(cls, @selector(drawRect:)),
+                                               (IMP)FLDrawRectIMP);
+
+    Method um = class_getInstanceMethod(cls, @selector(updateLayer));
+    e->origUpdate = um ? method_getImplementation(um) : NULL;
+    const char *utypes = um ? method_getTypeEncoding(um) : "v@:";
+    if (!class_addMethod(cls, @selector(updateLayer), (IMP)FLUpdateLayerIMP, utypes))
+        e->origUpdate = method_setImplementation(class_getInstanceMethod(cls, @selector(updateLayer)),
+                                                 (IMP)FLUpdateLayerIMP);
+
+    gFLEntryCount++;
 }
 
 static void *kFLWindowDoneKey = &kFLWindowDoneKey;
@@ -271,25 +292,41 @@ static BOOL FLInstallHover(NSWindow *w) {
     return YES;
 }
 
+// Traffic lights live only on genuine top-level main windows. Restricting to
+// those keeps us off auxiliary/custom windows (Chrome render-host surfaces,
+// popups, status bubbles, overlays, panels) where the standard buttons were
+// never created — calling -standardWindowButton: on those forces AppKit's lazy
+// _NSViewStandardButtonSearch to walk a custom frame view tree and can crash.
+static BOOL FLWindowEligible(NSWindow *w) {
+    NSWindowStyleMask m = w.styleMask;
+    if (!(m & NSWindowStyleMaskTitled))  return NO;   // needs a titlebar
+    if (m & NSWindowStyleMaskBorderless) return NO;
+    if (w.parentWindow)                  return NO;   // child / attached windows
+    if (!w.canBecomeMainWindow)          return NO;   // panels, popovers, overlays
+    if (w.level != NSNormalWindowLevel)  return NO;   // floating / overlay levels
+    return YES;
+}
+
+// The class swizzle already makes every standard window button paint as a square
+// on its own. This just nudges an existing window to repaint immediately and
+// installs the hover watcher for the glyph; it changes no classes.
 static void FLInstallOnWindow(NSWindow *w, BOOL forceRedraw) {
     if (!w || ![NSThread isMainThread]) return;
+    BRLightsArm();   // no-op once armed; retries if AppKit wasn't ready at launch
+    if (!FLWindowEligible(w)) return;
     if (!forceRedraw && objc_getAssociatedObject(w, kFLWindowDoneKey)) return;
 
     NSWindowButton types[3] = { NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton };
-    BOOL stillNeeds = NO, anyButton = NO;
+    BOOL anyButton = NO;
     for (int i = 0; i < 3; i++) {
         NSButton *b = [w standardWindowButton:types[i]];
         if (!b) continue;
         anyButton = YES;
-        BOOL installed = FLInstallOnButton(b);
-        if (installed || forceRedraw) [b setNeedsDisplay:YES];
-        if (strncmp(class_getName(object_getClass(b)), "FL_", 3) != 0) stillNeeds = YES;
+        [b setNeedsDisplay:YES];
     }
-    BOOL hoverReady = YES;
-    if (anyButton) hoverReady = FLInstallHover(w);
-    if (!stillNeeds && hoverReady) {
+    BOOL hoverReady = anyButton ? FLInstallHover(w) : YES;
+    if (anyButton && hoverReady)
         objc_setAssociatedObject(w, kFLWindowDoneKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
 }
 
 #pragma mark - Exposed entry points
@@ -303,8 +340,20 @@ void BRLightsRefreshAll(BOOL forceRedraw) {
 }
 
 // Discovery is driven by the core's NSWindow notifications (which call
-// BRLightsInstallOnWindow), so the lights module doesn't swizzle NSWindow's
-// show methods — that would double-hook the same methods the windows module
-// already swizzles. The actual squaring is per-instance isa-swizzling of the
-// three buttons, done in FLInstallOnWindow.
-void BRLightsArm(void) { /* no group swizzle needed */ }
+// BRLightsInstallOnWindow). The squaring itself is a one-time class-level
+// method swizzle of the three private window-button classes — no NSWindow
+// swizzle (the windows module owns that) and no per-instance isa changes.
+void BRLightsArm(void) {
+    static BOOL armed = NO;
+    if (armed) return;
+    // AppKit's private widget classes. Derived (close/zoom) before base (the
+    // minimize button is the base _NSThemeWidget) so captured originals are real.
+    Class close = objc_getClass("_NSThemeCloseWidget");
+    Class zoom  = objc_getClass("_NSThemeZoomWidget");
+    Class base  = objc_getClass("_NSThemeWidget");
+    if (!close || !zoom || !base) return;   // AppKit not ready yet — retry next call
+    FLSwizzleClass("_NSThemeCloseWidget");
+    FLSwizzleClass("_NSThemeZoomWidget");
+    FLSwizzleClass("_NSThemeWidget");
+    armed = YES;
+}

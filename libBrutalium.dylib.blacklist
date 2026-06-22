@@ -2,3 +2,5 @@ WindowServer
 loginwindow
 SecurityAgent
 authorizationhost
+screencaptureui
+Screenshot

@@ -16,15 +16,29 @@
 #define BR_ST_WIN     "com.tweak.brutalium.st.win"     // master|corners|toolbar|radius
 #define BR_ST_EXCL0   "com.tweak.brutalium.st.excl0"   // toolbar-exclusion bloom lo
 #define BR_ST_EXCL1   "com.tweak.brutalium.st.excl1"   // toolbar-exclusion bloom hi
+#define BR_ST_TEXCL0  "com.tweak.brutalium.st.texcl0"  // tint-exclusion bloom lo
+#define BR_ST_TEXCL1  "com.tweak.brutalium.st.texcl1"  // tint-exclusion bloom hi
+#define BR_ST_NTB0    "com.tweak.brutalium.st.ntb0"    // no-titlebar app bloom lo
+#define BR_ST_NTB1    "com.tweak.brutalium.st.ntb1"    // no-titlebar app bloom hi
+#define BR_ST_BORDER  "com.tweak.brutalium.st.border"  // window border: enabled|shadow|size
+#define BR_ST_BCOLOR  "com.tweak.brutalium.st.bcolor"  // 0xRRGGBBAA border colour (active)
+#define BR_ST_BCOLORI "com.tweak.brutalium.st.bcolori" // 0xRRGGBBAA border colour (inactive; 0 ⇒ use active)
 #define BR_ST_LFLAGS  "com.tweak.brutalium.st.lflags"  // lights: enabled|radius|size
 #define BR_ST_LCLOSE  "com.tweak.brutalium.st.lclose"  // 0xRRGGBBAA
 #define BR_ST_LMIN    "com.tweak.brutalium.st.lmin"
 #define BR_ST_LZOOM   "com.tweak.brutalium.st.lzoom"
 #define BR_ST_LINACT  "com.tweak.brutalium.st.linact"  // RGBA, or BR_AUTO_STATE
 #define BR_ST_LGLYPH  "com.tweak.brutalium.st.lglyph"
+#define BR_ST_TFLAGS  "com.tweak.brutalium.st.tflags"   // tint: enabled|mode|controls|wallpaper|chromeAuto
+#define BR_ST_TCOLOR  "com.tweak.brutalium.st.tcolor"   // 0xRRGGBBAA — main background
+#define BR_ST_TCHROME "com.tweak.brutalium.st.tchrome"  // 0xRRGGBBAA — sidebar/titlebar/toolbar
+#define BR_ST_TTEXT   "com.tweak.brutalium.st.ttext"    // 0xRRGGBBAA — precise text/label colour
 
 #define BR_SUITE      @"com.tweak.brutalium"
 #define BR_AUTO_STATE (1ULL << 32)
+
+// Tint appearance mode.
+enum { BR_MODE_AUTO = 0, BR_MODE_LIGHT = 1, BR_MODE_DARK = 2, BR_MODE_NONE = 3 };
 
 #pragma mark - Window flags
 
@@ -45,6 +59,22 @@ static inline void BRUnpackWin(uint64_t v, bool *valid, bool *master,
     *radius = (double)((v >> 8) & 0xFFFF) / 256.0;
 }
 
+// Window border: bit63 valid · bit0 enabled · bit1 shadow · bits 8..15 size (whole points)
+static inline uint64_t BRPackBorder(BOOL enabled, BOOL shadow, double size) {
+    uint64_t v = (1ULL << 63);
+    if (enabled) v |= 1ULL;
+    if (shadow)  v |= 2ULL;
+    long pts = lround(fmax(0.0, fmin(255.0, size)));
+    v |= ((uint64_t)(pts & 0xFF)) << 8;
+    return v;
+}
+static inline void BRUnpackBorder(uint64_t v, bool *valid, bool *enabled, bool *shadow, double *size) {
+    *valid = (v >> 63) & 1ULL;
+    *enabled = v & 1ULL;
+    *shadow = (v >> 1) & 1ULL;
+    *size = (double)((v >> 8) & 0xFF);
+}
+
 #pragma mark - Lights flags
 
 // bit63 valid · bit0 enabled · bits 1..16 radius q8 · bits 17..32 size signed q8
@@ -63,6 +93,39 @@ static inline void BRUnpackLFlags(uint64_t v, bool *valid, bool *enabled,
     uint16_t rq = (uint16_t)((v >> 1) & 0xFFFF);
     int16_t  sq = (int16_t)((v >> 17) & 0xFFFF);
     *radius = rq / 256.0; *size = sq / 256.0;
+}
+
+#pragma mark - Tint flags
+
+// bit63 valid · bit0 enabled · bits 1..2 mode · bit3 controls · bit4 wallpaper · bit5 chromeAuto · bit6 textAuto · bit7 icons
+static inline uint64_t BRPackTFlags(BOOL enabled, int mode, BOOL controls, BOOL wallpaper, BOOL chromeAuto, BOOL textAuto, BOOL icons) {
+    uint64_t v = (1ULL << 63);
+    if (enabled)    v |= 1ULL;
+    v |= ((uint64_t)(mode & 0x3)) << 1;
+    if (controls)   v |= (1ULL << 3);
+    if (wallpaper)  v |= (1ULL << 4);
+    if (chromeAuto) v |= (1ULL << 5);
+    if (textAuto)   v |= (1ULL << 6);
+    if (icons)      v |= (1ULL << 7);
+    return v;
+}
+static inline void BRUnpackTFlags(uint64_t v, bool *valid, bool *enabled, int *mode,
+                                  bool *controls, bool *wallpaper, bool *chromeAuto, bool *textAuto, bool *icons) {
+    *valid = (v >> 63) & 1ULL;
+    *enabled = v & 1ULL;
+    *mode = (int)((v >> 1) & 0x3);
+    *controls = (v >> 3) & 1ULL;
+    *wallpaper = (v >> 4) & 1ULL;
+    *chromeAuto = (v >> 5) & 1ULL;
+    *textAuto = (v >> 6) & 1ULL;
+    *icons = (v >> 7) & 1ULL;
+}
+
+static inline int BRModeFromString(NSString *s) {
+    if ([s caseInsensitiveCompare:@"light"] == NSOrderedSame) return BR_MODE_LIGHT;
+    if ([s caseInsensitiveCompare:@"dark"]  == NSOrderedSame) return BR_MODE_DARK;
+    if ([s caseInsensitiveCompare:@"none"]  == NSOrderedSame) return BR_MODE_NONE;
+    return BR_MODE_AUTO;
 }
 
 #pragma mark - Hex + Bloom
@@ -158,6 +221,55 @@ static inline void BRPublishFromDefaults(NSUserDefaults *d) {
     BRSetState(BR_ST_LZOOM,  zoom);
     BRSetState(BR_ST_LINACT, inact);
     BRSetState(BR_ST_LGLYPH, glyph);
+
+    // Tint
+    BOOL tEnabled  = [d objectForKey:@"tint.enabled"]  ? [d boolForKey:@"tint.enabled"]  : NO;
+    int  tMode     = BRModeFromString([d stringForKey:@"tint.mode"] ?: @"auto");
+    BOOL tControls = [d objectForKey:@"tint.controls"] ? [d boolForKey:@"tint.controls"] : YES;
+    BOOL tWall     = [d objectForKey:@"tint.wallpaper"]? [d boolForKey:@"tint.wallpaper"]: NO;
+
+    NSString *chromeStr = [d stringForKey:@"tint.chrome"] ?: @"auto";
+    BOOL tChromeAuto = [chromeStr caseInsensitiveCompare:@"auto"] == NSOrderedSame;
+
+    NSString *textStr = [d stringForKey:@"tint.text"] ?: @"auto";
+    BOOL tTextAuto = [textStr caseInsensitiveCompare:@"auto"] == NSOrderedSame;
+    BOOL tIcons = [d objectForKey:@"tint.icons"] ? [d boolForKey:@"tint.icons"] : NO;
+
+    uint32_t tColor, tChrome = 0, tText = 0xE6E6E6FF;
+    if (!BRHexToRGBA([d stringForKey:@"tint.color"], &tColor)) tColor = 0x1E1E28FF; // deep slate
+    if (!tChromeAuto && !BRHexToRGBA(chromeStr, &tChrome))     tChrome = 0x2C2C3CFF;
+    if (!tTextAuto)   BRHexToRGBA(textStr, &tText);            // keep default if malformed
+
+    BRSetState(BR_ST_TFLAGS,  BRPackTFlags(tEnabled, tMode, tControls, tWall, tChromeAuto, tTextAuto, tIcons));
+    BRSetState(BR_ST_TCOLOR,  tColor);
+    BRSetState(BR_ST_TCHROME, tChrome); // 0 + chromeAuto flag ⇒ derive in the dylib
+    BRSetState(BR_ST_TTEXT,   tText);   // applied only when textAuto is off
+
+    uint64_t telo = 0, tehi = 0;
+    NSArray *texcl = [d arrayForKey:@"tint.exclude"];
+    if ([texcl isKindOfClass:[NSArray class]])
+        for (id b in texcl) if ([b isKindOfClass:[NSString class]]) BRBloomAdd([b UTF8String], &telo, &tehi);
+    BRSetState(BR_ST_TEXCL0, telo);
+    BRSetState(BR_ST_TEXCL1, tehi);
+
+    uint64_t ntlo = 0, nthi = 0;
+    NSArray *ntb = [d arrayForKey:@"titlebar.hide"];
+    if ([ntb isKindOfClass:[NSArray class]])
+        for (id b in ntb) if ([b isKindOfClass:[NSString class]]) BRBloomAdd([b UTF8String], &ntlo, &nthi);
+    BRSetState(BR_ST_NTB0, ntlo);
+    BRSetState(BR_ST_NTB1, nthi);
+
+    BOOL bEnabled = [d objectForKey:@"border.enabled"] ? [d boolForKey:@"border.enabled"] : NO;
+    BOOL bShadow  = [d objectForKey:@"border.shadow"]  ? [d boolForKey:@"border.shadow"]  : YES;
+    double bSize  = [d objectForKey:@"border.size"]    ? [d doubleForKey:@"border.size"]   : 1.0;
+    uint32_t bColor;
+    if (!BRHexToRGBA([d stringForKey:@"border.color"], &bColor)) bColor = 0x000000FF; // black
+    BRSetState(BR_ST_BORDER, BRPackBorder(bEnabled, bShadow, bSize));
+    BRSetState(BR_ST_BCOLOR, bColor);
+    uint32_t bColorI = 0; // 0 ⇒ dylib falls back to the active colour
+    NSString *biStr = [d stringForKey:@"border.colorInactive"];
+    if (biStr) BRHexToRGBA(biStr, &bColorI);
+    BRSetState(BR_ST_BCOLORI, bColorI);
     notify_post(BR_NOTIFY_CHANGED);
 }
 

@@ -1,14 +1,15 @@
 //
-//  clitool.m — `brutalium` unified CLI (windows + lights).
+//  clitool.m — `brutalium` unified CLI (windows + lights + tint).
 //
 
 #import <Foundation/Foundation.h>
 #import "BRState.h"
 #import "BRThemes.h"
+#import "BRTintThemes.h"
 
 static void usage(void) {
     fprintf(stderr,
-        "Brutalium — square corners, expanded toolbar, square traffic lights\n"
+        "Brutalium — square corners, expanded toolbar, square traffic lights, system tint\n"
         "\n"
         "Usage: brutalium <command>\n"
         "\n"
@@ -22,12 +23,35 @@ static void usage(void) {
         "  toolbar exclude remove <bundleid>\n"
         "  toolbar exclude list\n"
         "\n"
+        "  titlebar hide <bundleid>       Remove the titlebar entirely for this app\n"
+        "  titlebar show <bundleid>       Stop removing it\n"
+        "  titlebar list\n"
+        "\n"
+        "  border on | off                Draw a border on every window\n"
+        "  border size <points>           Border width\n"
+        "  border color <#RRGGBB|#RRGGBBAA>          Active-window border colour\n"
+        "  border inactive <#RRGGBB|#RRGGBBAA|auto>  Inactive-window colour (auto = same as active)\n"
+        "  border shadow on | off         Window drop shadow\n"
+        "\n"
         "  lights on | off                Square the traffic-light buttons\n"
         "  lights radius <value>          Traffic-light corner radius\n"
         "  lights size <delta>            Adjust square size in points\n"
         "  lights color <slot> <value>    slot = close|min|zoom|inactive|glyph\n"
         "                                 value = #RRGGBB / #RRGGBBAA (inactive: auto)\n"
         "  lights theme <name> | list     Apply a colour preset\n"
+        "\n"
+        "  tint on | off                  Recolour the whole UI background\n"
+        "  tint color <#RRGGBB>           Main background colour\n"
+        "  tint chrome <#RRGGBB|auto>     Sidebar/titlebar/toolbar colour\n"
+        "  tint text <#RRGGBB|auto>       Precise text colour (auto = follow appearance)\n"
+        "  tint mode auto|light|dark|none Base appearance for controls/vibrancy\n"
+        "  tint controls on | off         Also tint control backgrounds\n"
+        "  tint icons on | off            Tint toolbar (template) icons with the text colour\n"
+        "  tint wallpaper on | off        Also tint the desktop/wallpaper process\n"
+        "  tint theme <name> | list       Apply a main+chrome preset\n"
+        "  tint exclude add <bundleid>    Don't tint this app at all\n"
+        "  tint exclude remove <bundleid>\n"
+        "  tint exclude list\n"
         "\n"
         "  status\n"
         "  publish\n");
@@ -68,6 +92,21 @@ int main(int argc, const char *argv[]) {
             [d setObject:@"auto"    forKey:@"lights.colorInactive"];
             [d setObject:@"#0000008C" forKey:@"lights.colorGlyph"];
             [d setObject:@"classic" forKey:@"lights.theme"];
+            [d setBool:NO     forKey:@"tint.enabled"];
+            [d setObject:@"#1E1E28" forKey:@"tint.color"];
+            [d setObject:@"auto"    forKey:@"tint.chrome"];
+            [d setObject:@"auto"    forKey:@"tint.text"];
+            [d setObject:@"auto"    forKey:@"tint.mode"];
+            [d setBool:YES    forKey:@"tint.controls"];
+            [d setBool:NO     forKey:@"tint.icons"];
+            [d setBool:NO     forKey:@"tint.wallpaper"];
+            [d setObject:@"derive"  forKey:@"tint.theme"];
+            [d setObject:@[]        forKey:@"tint.exclude"];
+            [d setObject:@[]        forKey:@"titlebar.hide"];
+            [d setBool:NO     forKey:@"border.enabled"];
+            [d setFloat:1.0f  forKey:@"border.size"];
+            [d setObject:@"#000000" forKey:@"border.color"];
+            [d setBool:YES    forKey:@"border.shadow"];
         }
 
         BOOL changed = YES;
@@ -99,6 +138,44 @@ int main(int argc, const char *argv[]) {
             } else {
                 [d setBool:(strcmp(argv[2], "on") == 0) forKey:@"toolbar.enabled"];
             }
+        }
+
+        else if (strcmp(cmd, "titlebar") == 0 && argc >= 3) {
+            NSMutableArray *list = [[d arrayForKey:@"titlebar.hide"] mutableCopy] ?: [NSMutableArray array];
+            if (strcmp(argv[2], "list") == 0) {
+                printf("Titlebar removed for:\n");
+                if (list.count == 0) printf("  (none)\n");
+                for (NSString *b in list) printf("  %s\n", b.UTF8String);
+                return 0;
+            }
+            if (argc < 4) { fprintf(stderr, "error: titlebar hide|show|list <bundleid>\n"); return 1; }
+            NSString *bid = [NSString stringWithUTF8String:argv[3]];
+            if (strcmp(argv[2], "hide") == 0)      { if (![list containsObject:bid]) [list addObject:bid]; }
+            else if (strcmp(argv[2], "show") == 0) { [list removeObject:bid]; }
+            else { fprintf(stderr, "error: titlebar hide|show|list <bundleid>\n"); return 1; }
+            [d setObject:list forKey:@"titlebar.hide"];
+        }
+
+        else if (strcmp(cmd, "border") == 0 && argc >= 3) {
+            if (strcmp(argv[2], "size") == 0 && argc >= 4) [d setFloat:(float)atof(argv[3]) forKey:@"border.size"];
+            else if (strcmp(argv[2], "color") == 0 && argc >= 4) {
+                NSString *val = [NSString stringWithUTF8String:argv[3]];
+                uint32_t v;
+                if (!BRHexToRGBA(val, &v)) { fprintf(stderr, "error: invalid colour '%s'\n", argv[3]); return 1; }
+                [d setObject:val forKey:@"border.color"];
+            }
+            else if (strcmp(argv[2], "inactive") == 0 && argc >= 4) {
+                NSString *val = [NSString stringWithUTF8String:argv[3]];
+                if ([val caseInsensitiveCompare:@"auto"] == NSOrderedSame) {
+                    [d removeObjectForKey:@"border.colorInactive"]; // fall back to active
+                } else {
+                    uint32_t v;
+                    if (!BRHexToRGBA(val, &v)) { fprintf(stderr, "error: invalid colour '%s'\n", argv[3]); return 1; }
+                    [d setObject:val forKey:@"border.colorInactive"];
+                }
+            }
+            else if (strcmp(argv[2], "shadow") == 0 && argc >= 4) [d setBool:(strcmp(argv[3], "on") == 0) forKey:@"border.shadow"];
+            else [d setBool:(strcmp(argv[2], "on") == 0) forKey:@"border.enabled"];
         }
 
         else if (strcmp(cmd, "lights") == 0 && argc >= 3) {
@@ -136,6 +213,82 @@ int main(int argc, const char *argv[]) {
             else { usage(); return 1; }
         }
 
+        else if (strcmp(cmd, "tint") == 0 && argc >= 3) {
+            const char *sub = argv[2];
+            if (strcmp(sub, "exclude") == 0) {
+                NSMutableArray *list = [[d arrayForKey:@"tint.exclude"] mutableCopy] ?: [NSMutableArray array];
+                if (argc >= 4 && strcmp(argv[3], "list") == 0) {
+                    printf("Tint exclusions:\n");
+                    if (list.count == 0) printf("  (none)\n");
+                    for (NSString *b in list) printf("  %s\n", b.UTF8String);
+                    return 0;
+                }
+                if (argc < 5) { fprintf(stderr, "error: tint exclude add|remove|list <bundleid>\n"); return 1; }
+                NSString *bid = [NSString stringWithUTF8String:argv[4]];
+                if (strcmp(argv[3], "add") == 0)         { if (![list containsObject:bid]) [list addObject:bid]; }
+                else if (strcmp(argv[3], "remove") == 0) { [list removeObject:bid]; }
+                else { fprintf(stderr, "error: tint exclude add|remove|list\n"); return 1; }
+                [d setObject:list forKey:@"tint.exclude"];
+            }
+            else if (strcmp(sub, "on") == 0 || strcmp(sub, "off") == 0) {
+                [d setBool:(strcmp(sub, "on") == 0) forKey:@"tint.enabled"];
+            }
+            else if (strcmp(sub, "color") == 0 && argc >= 4) {
+                NSString *val = [NSString stringWithUTF8String:argv[3]];
+                uint32_t v;
+                if (!BRHexToRGBA(val, &v)) { fprintf(stderr, "error: invalid colour '%s'\n", argv[3]); return 1; }
+                [d setObject:val forKey:@"tint.color"];
+                [d setObject:@"custom" forKey:@"tint.theme"];
+            }
+            else if (strcmp(sub, "chrome") == 0 && argc >= 4) {
+                NSString *val = [NSString stringWithUTF8String:argv[3]];
+                uint32_t v;
+                if ([val caseInsensitiveCompare:@"auto"] != NSOrderedSame && !BRHexToRGBA(val, &v)) {
+                    fprintf(stderr, "error: chrome must be #RRGGBB or auto\n"); return 1;
+                }
+                [d setObject:val forKey:@"tint.chrome"];
+                [d setObject:@"custom" forKey:@"tint.theme"];
+            }
+            else if (strcmp(sub, "text") == 0 && argc >= 4) {
+                NSString *val = [NSString stringWithUTF8String:argv[3]];
+                uint32_t v;
+                if ([val caseInsensitiveCompare:@"auto"] != NSOrderedSame && !BRHexToRGBA(val, &v)) {
+                    fprintf(stderr, "error: text must be #RRGGBB or auto\n"); return 1;
+                }
+                [d setObject:val forKey:@"tint.text"];
+                [d setObject:@"custom" forKey:@"tint.theme"];
+            }
+            else if (strcmp(sub, "mode") == 0 && argc >= 4) {
+                NSString *m = [NSString stringWithUTF8String:argv[3]];
+                if ([m caseInsensitiveCompare:@"auto"]  != NSOrderedSame &&
+                    [m caseInsensitiveCompare:@"light"] != NSOrderedSame &&
+                    [m caseInsensitiveCompare:@"dark"]  != NSOrderedSame &&
+                    [m caseInsensitiveCompare:@"none"]  != NSOrderedSame) {
+                    fprintf(stderr, "error: mode must be auto|light|dark|none\n"); return 1;
+                }
+                [d setObject:m.lowercaseString forKey:@"tint.mode"];
+            }
+            else if (strcmp(sub, "controls")  == 0 && argc >= 4) [d setBool:(strcmp(argv[3], "on") == 0) forKey:@"tint.controls"];
+            else if (strcmp(sub, "icons")     == 0 && argc >= 4) [d setBool:(strcmp(argv[3], "on") == 0) forKey:@"tint.icons"];
+            else if (strcmp(sub, "wallpaper") == 0 && argc >= 4) [d setBool:(strcmp(argv[3], "on") == 0) forKey:@"tint.wallpaper"];
+            else if (strcmp(sub, "theme") == 0) {
+                if (argc >= 4 && strcmp(argv[3], "list") == 0) {
+                    printf("Tint themes:\n");
+                    for (int i = 0; i < kBRTintThemeCount; i++) printf("  %s\n", kBRTintThemes[i].name);
+                    printf("  custom\n");
+                    return 0;
+                }
+                if (argc < 4) { fprintf(stderr, "error: tint theme <name> (try: tint theme list)\n"); return 1; }
+                const BRTintTheme *th = BRTintThemeNamed(argv[3]);
+                if (!th) { fprintf(stderr, "error: unknown theme '%s'\n", argv[3]); return 1; }
+                [d setObject:@(th->color)  forKey:@"tint.color"];
+                [d setObject:@(th->chrome) forKey:@"tint.chrome"];
+                [d setObject:@(th->mode)   forKey:@"tint.mode"];
+                [d setObject:@(th->name)   forKey:@"tint.theme"];
+            }
+            else { usage(); return 1; }
+        }
+
         else if (strcmp(cmd, "status") == 0) {
             changed = NO;
             NSArray *ex = [d arrayForKey:@"toolbar.exclude"];
@@ -145,6 +298,14 @@ int main(int argc, const char *argv[]) {
                    [d floatForKey:@"corners.radius"], [d floatForKey:@"corners.radius"] == 0 ? " square" : "");
             printf("  toolbar        : %s\n", [d boolForKey:@"toolbar.enabled"] ? "on" : "off");
             printf("  toolbar excl.  : %s\n", ex.count ? [[ex componentsJoinedByString:@", "] UTF8String] : "(none)");
+            printf("  titlebar hidden: %lu app(s)\n",
+                   (unsigned long)([d arrayForKey:@"titlebar.hide"] ?: @[]).count);
+            printf("  border         : %s  (size %.1f, color %s, inactive %s, shadow %s)\n",
+                   [d boolForKey:@"border.enabled"] ? "on" : "off",
+                   [d floatForKey:@"border.size"],
+                   [([d stringForKey:@"border.color"] ?: @"-") UTF8String],
+                   [([d stringForKey:@"border.colorInactive"] ?: @"(same)") UTF8String],
+                   [d boolForKey:@"border.shadow"] ? "on" : "off");
             printf("  lights         : %s  (radius %.1f, size %+.1f, theme %s)\n",
                    [d boolForKey:@"lights.enabled"] ? "on" : "off",
                    [d floatForKey:@"lights.radius"], [d floatForKey:@"lights.size"],
@@ -155,6 +316,19 @@ int main(int argc, const char *argv[]) {
                    [([d stringForKey:@"lights.colorZoom"] ?: @"-") UTF8String],
                    [([d stringForKey:@"lights.colorInactive"] ?: @"-") UTF8String],
                    [([d stringForKey:@"lights.colorGlyph"] ?: @"-") UTF8String]);
+            printf("  tint           : %s  (theme %s, mode %s)\n",
+                   [d boolForKey:@"tint.enabled"] ? "on" : "off",
+                   [([d stringForKey:@"tint.theme"] ?: @"custom") UTF8String],
+                   [([d stringForKey:@"tint.mode"] ?: @"auto") UTF8String]);
+            printf("    color=%s chrome=%s text=%s controls=%s icons=%s wallpaper=%s\n",
+                   [([d stringForKey:@"tint.color"] ?: @"-") UTF8String],
+                   [([d stringForKey:@"tint.chrome"] ?: @"-") UTF8String],
+                   [([d stringForKey:@"tint.text"] ?: @"auto") UTF8String],
+                   [d boolForKey:@"tint.controls"] ? "on" : "off",
+                   [d boolForKey:@"tint.icons"] ? "on" : "off",
+                   [d boolForKey:@"tint.wallpaper"] ? "on" : "off");
+            printf("    excluded apps: %lu\n",
+                   (unsigned long)([d arrayForKey:@"tint.exclude"] ?: @[]).count);
         }
         else if (strcmp(cmd, "publish") == 0) { changed = NO; BRPublishFromDefaults(d); printf("Published.\n"); }
         else { usage(); return 1; }
