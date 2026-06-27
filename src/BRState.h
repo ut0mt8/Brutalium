@@ -43,19 +43,21 @@ enum { BR_MODE_AUTO = 0, BR_MODE_LIGHT = 1, BR_MODE_DARK = 2, BR_MODE_NONE = 3 }
 #pragma mark - Window flags
 
 // bit63 valid · bit0 master · bit1 corners · bit2 toolbar · bits 8..23 radius q8
-static inline uint64_t BRPackWin(BOOL master, BOOL corners, BOOL toolbar, double radius) {
+static inline uint64_t BRPackWin(BOOL master, BOOL corners, BOOL toolbar, BOOL squareLayers, double radius) {
     uint64_t v = (1ULL << 63);
     if (master)  v |= 1ULL;
     if (corners) v |= 2ULL;
     if (toolbar) v |= 4ULL;
+    if (squareLayers) v |= 8ULL;
     uint16_t rq = (uint16_t)lround(fmax(0.0, radius) * 256.0);
     v |= ((uint64_t)rq) << 8;
     return v;
 }
 static inline void BRUnpackWin(uint64_t v, bool *valid, bool *master,
-                               bool *corners, bool *toolbar, double *radius) {
+                               bool *corners, bool *toolbar, bool *squareLayers, double *radius) {
     *valid = (v >> 63) & 1ULL; *master = v & 1ULL;
     *corners = (v >> 1) & 1ULL; *toolbar = (v >> 2) & 1ULL;
+    *squareLayers = (v >> 3) & 1ULL;
     *radius = (double)((v >> 8) & 0xFFFF) / 256.0;
 }
 
@@ -188,6 +190,7 @@ static inline void BRPublishFromDefaults(NSUserDefaults *d) {
     BOOL master  = [d objectForKey:@"enabled"]         ? [d boolForKey:@"enabled"]         : YES;
     BOOL corners = [d objectForKey:@"corners.enabled"] ? [d boolForKey:@"corners.enabled"] : YES;
     BOOL toolbar = [d objectForKey:@"toolbar.enabled"] ? [d boolForKey:@"toolbar.enabled"] : YES;
+    BOOL squareLayers = [d objectForKey:@"corners.layers"] ? [d boolForKey:@"corners.layers"] : NO;
     double cradius = [d floatForKey:@"corners.radius"];
 
     uint64_t lo = 0, hi = 0;
@@ -212,7 +215,7 @@ static inline void BRPublishFromDefaults(NSUserDefaults *d) {
     else if (BRHexToRGBA(ia, &iv))                                   inact = iv;
     else                                                             inact = BR_AUTO_STATE;
 
-    BRSetState(BR_ST_WIN,    BRPackWin(master, corners, toolbar, cradius));
+    BRSetState(BR_ST_WIN,    BRPackWin(master, corners, toolbar, squareLayers, cradius));
     BRSetState(BR_ST_EXCL0,  lo);
     BRSetState(BR_ST_EXCL1,  hi);
     BRSetState(BR_ST_LFLAGS, BRPackLFlags(lenabled, lradius, lsize));

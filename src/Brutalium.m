@@ -20,6 +20,7 @@
 #pragma mark - Config cache (defined here, declared extern in BRConfig.h)
 
 BOOL     gMaster = YES, gCorners = YES, gToolbar = YES;
+BOOL     gSquareLayers = NO;
 double   gCornerRadius = 0.0;
 uint64_t gExcl0 = 0, gExcl1 = 0;
 BOOL     gSelfExcluded = NO;
@@ -64,10 +65,10 @@ static void BRRecomputeSelfExclusion(void) {
 
 static void BRRefreshConfig(void) {
     uint64_t w = 0; notify_get_state(gTokWin, &w);
-    bool valid = false, m = false, c = false, t = false; double rad = 0;
-    BRUnpackWin(w, &valid, &m, &c, &t, &rad);
-    if (valid) { gMaster = m; gCorners = c; gToolbar = t; gCornerRadius = rad; }
-    else       { gMaster = YES; gCorners = YES; gToolbar = YES; gCornerRadius = 0.0; }
+    bool valid = false, m = false, c = false, t = false, sl = false; double rad = 0;
+    BRUnpackWin(w, &valid, &m, &c, &t, &sl, &rad);
+    if (valid) { gMaster = m; gCorners = c; gToolbar = t; gSquareLayers = sl; gCornerRadius = rad; }
+    else       { gMaster = YES; gCorners = YES; gToolbar = YES; gSquareLayers = NO; gCornerRadius = 0.0; }
 
     gExcl0 = 0; notify_get_state(gTokExcl0, &gExcl0);
     gExcl1 = 0; notify_get_state(gTokExcl1, &gExcl1);

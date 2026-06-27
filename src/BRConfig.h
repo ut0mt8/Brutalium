@@ -11,6 +11,7 @@
 // Windows module config
 extern BOOL     gMaster;        // master on/off for the whole tweak
 extern BOOL     gCorners;       // square window corners
+extern BOOL     gSquareLayers;  // square EVERY CALayer's corners (app-wide, aggressive)
 extern BOOL     gToolbar;       // force expanded toolbar
 extern double   gCornerRadius;  // 0 == fully square
 extern uint64_t gExcl0, gExcl1; // toolbar-exclusion bloom filter
@@ -49,6 +50,7 @@ extern NSColor *gTintTextObj;         // precise text/label colour (cached, opaq
 
 // Effective gates (master AND the per-feature toggle).
 static inline BOOL BRCornersActive(void) { return gMaster && gCorners; }
+static inline BOOL BRSquareLayersActive(void) { return gMaster && gSquareLayers; }
 static inline BOOL BRToolbarActive(void) { return gMaster && gToolbar && !gSelfExcluded; }
 static inline BOOL BRLightsActive(void)  { return gMaster && gLEnabled; }
 static inline BOOL BRNoTitlebarActive(void) { return gMaster && gSelfNoTitlebar; }

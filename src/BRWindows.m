@@ -70,7 +70,14 @@ void BRWindowsApply(NSWindow *w) {
     // Remove the titlebar for opted-in apps — but only on genuine top-level main
     // windows (not panels/inspectors/sheets), and without losing the toolbar.
     if (BRNoTitlebarActive() && BRWindowIsMain(w)) {
-        @try {
+        NSView *tframe = w.contentView.superview;
+        // Only standard AppKit windows (NSThemeFrame) can have their titlebar cleanly
+        // removed. Custom-frame apps (Chrome/Electron/Thunderbird) draw their own
+        // titlebar/tab strip and reserve a fixed leading inset for the window controls
+        // that we cannot reclaim — hiding the lights there only leaves an orphan gap —
+        // so we leave those windows untouched.
+        BOOL standardFrame = tframe && [tframe isKindOfClass:NSClassFromString(@"NSThemeFrame")];
+        if (standardFrame) @try {
             w.titlebarAppearsTransparent = YES;
             w.titleVisibility = NSWindowTitleHidden;
             w.styleMask |= NSWindowStyleMaskFullSizeContentView;
@@ -78,14 +85,13 @@ void BRWindowsApply(NSWindow *w) {
             // Hide the traffic-light buttons so the result is consistent whether or not
             // the window has a toolbar — otherwise toolbar windows (Finder browser) keep
             // showing the lights + an empty title row while toolbar-less windows look
-            // fully clean. (Safe here: gated to genuine main windows with standard frames.)
+            // fully clean.
             for (NSWindowButton b = NSWindowCloseButton; b <= NSWindowZoomButton; b++)
                 [w standardWindowButton:b].hidden = YES;
             // Keep the toolbar: only collapse the whole titlebar container when there's
             // no toolbar to preserve (Finder's toolbar lives inside that container).
             BOOL hasToolbar = (w.toolbar != nil) && w.toolbar.isVisible;
-            NSView *frame = w.contentView.superview;
-            for (NSView *sv in frame.subviews)
+            for (NSView *sv in tframe.subviews)
                 if (strstr(class_getName(object_getClass(sv)), "TitlebarContainer"))
                     sv.hidden = !hasToolbar;
         } @catch (__unused NSException *e) {}
@@ -176,6 +182,26 @@ ZKSwizzleInterfaceGroup(BRW_TitlebarDecorationView, _NSTitlebarDecorationView, N
 - (void)drawRect:(NSRect)dirtyRect {
     if (BRCornersActive()) return; // suppress decoration drawing
     ZKOrig(void, dirtyRect);
+}
+@end
+
+// Square EVERY CALayer's corners app-wide (aggressive — buttons, fields, popovers,
+// menus, etc.). Off by default; gated by BRSquareLayersActive(). Forces an
+// imperceptible radius (1e-7, like apple-sharpener) and ignores any radius an app
+// tries to set, so rounded rects stay flat. When the option is off, both methods
+// behave exactly like the originals.
+ZKSwizzleInterfaceGroup(BRW_CALayer, CALayer, CALayer, BRUTALIUM_WINDOWS)
+@implementation BRW_CALayer
+- (void)layoutSublayers {
+    ZKOrig(void);
+    if (BRSquareLayersActive()) {
+        ((CALayer *)self).cornerRadius = 1e-7;
+        CALayer *m = ((CALayer *)self).mask;
+        if (m) m.cornerRadius = 1e-7;
+    }
+}
+- (void)setCornerRadius:(CGFloat)radius {
+    ZKOrig(void, BRSquareLayersActive() ? (CGFloat)1e-7 : radius);
 }
 @end
 
