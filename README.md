@@ -145,5 +145,4 @@ at the cost of list changes applying on the target app's next launch rather than
 
 ## Thanks
 
-@CoreBedtime (Ammonia), @aspauldingcode (apple-sharpener), @MTACS (Zephyr),
-@ut0mt8 (uifixer).
+@CoreBedtime (Ammonia), @aspauldingcode (apple-sharpener), @MTACS (Zephyr)
