@@ -1,6 +1,6 @@
 # Brutalium
 
-A macOS [Ammonia](https://github.com/CoreBedtime/ammonia) tweak that makes the whole
+A macOS [Ammonia](https://github.com/CoreBedtime/ammonia) or playground tweak that makes the whole
 UI brutally square and optionally recolours and reshapes it for every app:
 
 - **Square window corners** (configurable radius; `0` = fully square) + flatter titlebar.
@@ -10,9 +10,6 @@ UI brutally square and optionally recolours and reshapes it for every app:
 - **System tint**: recolour the whole UI to any colour background, chrome, precise text, toolbar icons with themes and a per-app exclusion list.
 - **Titlebar removal** per app (keeps the toolbar where there is one).
 - **Window borders** with separate active/inactive colours, width, and a drop-shadow toggle.
-
-It merges three earlier tweaks UIFixer (windows), FlatLights (traffic lights) and
-BrutalTint (system tint) into one dylib, one CLI (`brutalium`), and one config.
 
 ## Architecture
 
