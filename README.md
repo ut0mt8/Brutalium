@@ -1,25 +1,44 @@
 # Brutalium
 
-*Strip the gloss. Sharpen the edges.*
+A macOS [Ammonia](https://github.com/CoreBedtime/ammonia) tweak that makes the whole
+UI brutally square and optionally recolours and reshapes it for every app:
 
-A macOS [Ammonia](https://github.com/CoreBedtime/ammonia) or playground tweak that makes the whole UI brutally square — and optionally recolours it — for every app:
-
-- **Square window corners** (configurable radius; `0` = fully square).
-- **Expanded toolbar style** forced everywhere, with a runtime per-app exclusion list.
-- **Remove titlebar** disable by default, per-app include list.
+- **Square window corners** (configurable radius; `0` = fully square) + flatter titlebar.
+- **Square *every* layer's corners** (optional, aggressive): buttons, fields, popovers, menus.
+- **Expanded toolbar style** forced everywhere, with a per-app exclusion list.
 - **Square traffic-light buttons** (close / minimise / zoom) with configurable colours, themes, size, and a hover glyph.
-- **Border over windows** (configurable, with colours, size and shadows.
+- **System tint**: recolour the whole UI to any colour background, chrome, precise text, toolbar icons with themes and a per-app exclusion list.
+- **Titlebar removal** per app (keeps the toolbar where there is one).
+- **Window borders** with separate active/inactive colours, width, and a drop-shadow toggle.
+
+It merges three earlier tweaks UIFixer (windows), FlatLights (traffic lights) and
+BrutalTint (system tint) into one dylib, one CLI (`brutalium`), and one config.
 
 ## Architecture
 
-One injected dylib, two feature modules over shared scaffolding:
+One injected dylib, three feature modules over shared scaffolding:
 
-- `Brutalium.m` — core: process gating, the notify-state config cache, window discovery, and the constructor that arms both modules.
-- `BRWindows.m` — corners + toolbar (private `NSWindow` corner plumbing; `setToolbarStyle:` enforcement).
-- `BRLights.m` — per-instance isa-swizzling of the three control buttons; square rendering + hover tracking.
-- `BRState.h` / `BRConfig.h` — wire format (notify state) and the shared config cache.
+- `Brutalium.m` core: process gating, the notify-state config cache, window
+  discovery, and the constructor that arms every module.
+- `BRWindows.m` corners + expanded toolbar + titlebar removal + window borders, plus
+  the optional global `CALayer` corner-squaring (private `NSWindow` corner plumbing and
+  a ZKSwizzle group).
+- `BRLights.m` class-level method swizzle of the three private window-button classes;
+  square rendering + hover tracking.
+- `BRTint.m` `NSColor` class-method overrides (backgrounds + text), an
+  `NSVisualEffectView` takeover for chrome, an opaque backdrop, appearance forcing, and
+  toolbar-icon tinting.
+- `BRState.h` / `BRConfig.h` wire format (notify state + global-domain lists) and the shared config cache;
+  `BRThemes.h` / `BRTintThemes.h` colour presets.
 
-Shared robustness: completely inert in Chromium/Electron child processes, and the swizzles are armed only in real app processes. FlatLights squares the traffic lights via a one-time class-level method swizzle of the three private window-button classes — it never reclasses individual buttons, so it coexists with the `NSKVONotifying_` subclasses and Swift titlebar property system AppKit uses under Solarium (squared lights work whether Solarium is on or off). Per-window discovery (for the hover glyph and prompt repaint) targets only genuine top-level main windows, skipping child windows, panels, popovers, and overlays. All configuration is carried over Darwin notify state so it reaches sandboxed apps (Finder, Mail, Notes, Safari…).
+Shared robustness: completely inert in Chromium/Electron child processes; swizzles are
+armed only in real app processes. Traffic lights use a one-time class-level swizzle (no
+per-instance reclassing), so they coexist with the `NSKVONotifying_` subclasses and the
+Swift titlebar property system under Solarium. Window-affecting features target only
+genuine top-level main windows, skipping child windows, panels, popovers, and overlays.
+All configuration reaches sandboxed apps (Finder, Mail, Notes, Safari, System
+Settings…): live settings travel over Darwin notify state, and the per-app lists ride a
+global-domain key. See **Config transport** below.
 
 ## Build & install
 
@@ -28,118 +47,106 @@ make
 sudo make install
 ```
 
-Relaunch apps to pick up the injection. Settings changes apply live.
+Relaunch apps to pick up the injection. Most settings changes apply live via `publish`;
+changes to the per-app exclude/hide lists take effect on the target app's next launch. A
+`com.tweak.brutalium.publish` LaunchAgent also republishes at login so sandboxed apps
+get everything before launch.
+
+Targeting note: most features apply everywhere and are scoped by per-app exclude/include
+lists keyed by **bundle id**. Find one with `osascript -e 'id of app "Finder"'` or
+`lsappinfo info -only bundleid $(pgrep -x Finder)`.
 
 ## Usage
 
 ```sh
-Brutalium — square corners, expanded toolbar, square traffic lights, system tint
+brutalium on | off | toggle              # master enable
 
-Usage: brutalium <command>
+# Corners ------------------------------------------------------------------
+brutalium corners on                     # square window corners
+brutalium corners radius 0               # 0 = fully square
+brutalium corners layers on              # square EVERY layer's corners (aggressive)
+brutalium corners toolbar on             # square only toolbar-item corners (scoped)
 
-  on | off | toggle              Master enable
+# Toolbar ------------------------------------------------------------------
+brutalium toolbar on                     # force the expanded toolbar style
+brutalium toolbar exclude add com.apple.finder
+brutalium toolbar exclude remove com.apple.finder
+brutalium toolbar exclude list
 
-  corners on | off               Square window corners
-  corners radius <value>         0 = fully square
-
-  toolbar on | off               Force expanded toolbar
-  toolbar exclude add <bundleid> Don't force toolbar for this app
-  toolbar exclude remove <bundleid>
-  toolbar exclude list
-
-  titlebar hide <bundleid>       Remove the titlebar entirely for this app
-  titlebar show <bundleid>       Stop removing it
-  titlebar list
-
-  border on | off                Draw a border on every window
-  border size <points>           Border width
-  border color <#RRGGBB|#RRGGBBAA>          Active-window border colour
-  border inactive <#RRGGBB|#RRGGBBAA|auto>  Inactive-window colour (auto = same as active)
-  border shadow on | off         Window drop shadow
-
-  lights on | off                Square the traffic-light buttons
-  lights radius <value>          Traffic-light corner radius
-  lights size <delta>            Adjust square size in points
-  lights color <slot> <value>    slot = close|min|zoom|inactive|glyph
-                                 value = #RRGGBB / #RRGGBBAA (inactive: auto)
-  lights theme <name> | list     Apply a colour preset
-
-  tint on | off                  Recolour the whole UI background
-  tint color <#RRGGBB>           Main background colour
-  tint chrome <#RRGGBB|auto>     Sidebar/titlebar/toolbar colour
-  tint text <#RRGGBB|auto>       Precise text colour (auto = follow appearance)
-  tint mode auto|light|dark|none Base appearance for controls/vibrancy
-  tint controls on | off         Also tint control backgrounds
-  tint icons on | off            Tint toolbar (template) icons with the text colour
-  tint wallpaper on | off        Also tint the desktop/wallpaper process
-  tint theme <name> | list       Apply a main+chrome preset
-  tint exclude add <bundleid>    Don't tint this app at all
-  tint exclude remove <bundleid>
-  tint exclude list
-
-  status
-  publish
-```
-
-Find a bundle id with e.g. `osascript -e 'id of app "Finder"'`.
-
-
-## Tint (system colour)
-
-Folded in from BrutalTint: recolour the whole UI background to any colour, with a
-separate chrome colour for vibrancy areas (sidebars/titlebars/toolbars). Off by
-default — turn it on explicitly.
-
-```sh
-brutalium tint on
-brutalium tint theme nord        # or: tint color #1E1E28 ; tint chrome auto
-brutalium tint text #E6E6E6      # precise text colour, agnostic of the base (auto = follow appearance)
-brutalium tint mode none         # auto|light|dark|none — base appearance for controls/vibrancy
-brutalium tint icons on          # tint toolbar template icons with the text colour
-brutalium tint controls on       # also tint control backgrounds
-brutalium tint wallpaper off     # leave the desktop alone (default)
-brutalium tint exclude add com.foo.bar   # never tint this app
-brutalium publish
-```
-
-Tint stays out of the screenshot UI and (unless `tint wallpaper on`) the desktop
-process. `tint theme list` shows the presets.
-
-## Titlebar removal (per app)
-
-Remove the titlebar entirely for chosen apps — content floats up under a hidden,
-transparent titlebar and the titlebar container (with its traffic-light buttons) is
-hidden. The window stays draggable by its body.
-
-```sh
-brutalium titlebar hide com.foo.bar
+# Titlebar removal (per app) -----------------------------------------------
+brutalium titlebar hide com.foo.bar      # remove titlebar; keeps the toolbar if present
 brutalium titlebar show com.foo.bar
 brutalium titlebar list
-brutalium publish && killall <app>
-```
 
-## Window borders
-
-A configurable border + drop shadow on every titled window.
-
-```sh
+# Window borders -----------------------------------------------------------
 brutalium border on
 brutalium border size 2
-brutalium border color #00000080     # active-window colour (#RRGGBB or #RRGGBBAA)
-brutalium border inactive #00000030  # inactive-window colour (auto = same as active)
-brutalium border shadow off
-brutalium publish
+brutalium border color #FFFFFF           # active window   (#RRGGBB or #RRGGBBAA)
+brutalium border inactive #555555        # inactive window (auto = same as active)
+brutalium border shadow on | off
+
+# Traffic lights -----------------------------------------------------------
+brutalium lights on
+brutalium lights radius 0
+brutalium lights size +1
+brutalium lights color close "#FF3B30"   # close|min|zoom|inactive|glyph
+brutalium lights color inactive auto
+brutalium lights theme nord              # 20 presets
+brutalium lights theme list
+
+# System tint --------------------------------------------------------------
+brutalium tint on
+brutalium tint theme nord                # 27 presets; or set colours manually:
+brutalium tint color #1E1E28             # main background
+brutalium tint chrome auto               # sidebars/titlebars/toolbars (auto = derive)
+brutalium tint text #E6E6E6              # precise text colour (auto = follow appearance)
+brutalium tint mode none                 # auto|light|dark|none base appearance
+brutalium tint controls on               # also tint control backgrounds
+brutalium tint icons on                  # tint toolbar (template) icons with the text colour
+brutalium tint wallpaper off             # leave the desktop alone (default)
+brutalium tint exclude add com.foo.bar   # never tint this app
+brutalium tint exclude list
+
+brutalium status                         # show all current settings
+brutalium publish                        # apply now (also runs at login)
 ```
 
-The border is drawn on the window frame layer, so it follows the squared (or rounded)
-window shape.
+## Feature notes
 
-## Notes
+**Corners.** Window squaring uses private `NSWindow` methods (`cornerRadius`,
+`_setCornerRadius:`, `_cornerMask`, `_updateCornerMask`) best-effort across macOS
+versions. `corners layers` is the aggressive option: a global `CALayer` swizzle that
+forces every layer's `cornerRadius` to ~0, flattening *all* rounded rects (including
+ones you might want round, like circular buttons). Off by default.
 
-- A `com.tweak.brutalium.publish` LaunchAgent republishes settings at login so sandboxed apps get them before launch; `brutalium publish` does it on demand.
-- Corner squaring uses private `NSWindow` methods (`cornerRadius`, `_setCornerRadius:`, `_cornerMask`, `_updateCornerMask`) — best-effort across macOS versions.
-- The toolbar exclusion list is a 128-bit Bloom filter in notify state (rare false positives just mean an app's toolbar isn't forced).
+**Titlebar removal.** Applies only to standard `NSThemeFrame` main windows. The title
+and traffic lights are hidden; if the window has a toolbar (e.g. Finder) the toolbar is
+preserved. Custom-frame apps (Chrome/Electron/Thunderbird) are left untouched they
+draw their own titlebar/tab strip and reserve a leading inset for the window controls
+that a tweak can't reclaim, so removing it there would only leave an orphan gap.
+
+**Borders.** Drawn on the window frame's own layer (so it never intercepts clicks) and
+re-coloured on every focus/app-activation change. Use clearly different active/inactive
+colours to see the switch. Follows the squared/rounded shape; `shadow` toggles the
+window drop shadow.
+
+**Tint.** Background recolouring works app-wide via the `NSColor` swizzle (no per-window
+work). The precise `text` colour is base-agnostic pair it with `mode none` to fully
+decouple text from the background. `icons` only affects *template* images (full-colour
+icons are unchanged). Menus, popovers, selection and tooltip materials are left native
+so hover highlights survive. Tint stays out of the screenshot UI and, unless
+`tint wallpaper on`, the desktop process. Excluding a previously-tinted app restores its
+original window opacity and background.
+
+**Config transport.** Live settings (toggles, colours, sizes, modes) travel over Darwin
+notify state so they reach sandboxed apps and apply instantly. The per-app *lists*
+(toolbar exclude, tint exclude, titlebar hide) instead live in a single global-domain
+key, `com.tweak.brutalium.lists` the same channel every app reads `AppleInterfaceStyle`
+from, so it's readable inside any sandbox. That gives exact string matching (no Bloom
+false positives) and an inspectable config (`defaults read -g com.tweak.brutalium.lists`),
+at the cost of list changes applying on the target app's next launch rather than live.
 
 ## Thanks
 
-@CoreBedtime (Ammonia/Playground), @aspauldingcode (apple-sharpener), @MTACS (Zephyr)
+@CoreBedtime (Ammonia), @aspauldingcode (apple-sharpener), @MTACS (Zephyr),
+@ut0mt8 (uifixer).

@@ -21,8 +21,8 @@
 
 BOOL     gMaster = YES, gCorners = YES, gToolbar = YES;
 BOOL     gSquareLayers = NO;
+BOOL     gSquareToolbar = NO;
 double   gCornerRadius = 0.0;
-uint64_t gExcl0 = 0, gExcl1 = 0;
 BOOL     gSelfExcluded = NO;
 
 BOOL     gLEnabled = YES;
@@ -41,41 +41,44 @@ BOOL     gTintTextAuto = YES;
 BOOL     gTintIcons = NO;
 uint32_t gTintColorRGBA = 0x1E1E28FF, gTintChromeRGBA = 0x2C2C3CFF, gTintTextRGBA = 0xE6E6E6FF;
 NSColor *gTintColorObj = nil, *gTintChromeObj = nil, *gTintTextObj = nil;
-uint64_t gTintExcl0 = 0, gTintExcl1 = 0;
 BOOL     gTintSelfExcluded = NO;
-uint64_t gNoTB0 = 0, gNoTB1 = 0;
 BOOL     gSelfNoTitlebar = NO;
 BOOL     gBorderEnabled = NO, gBorderShadow = YES;
 double   gBorderSize = 1.0;
 uint32_t gBorderRGBA = 0x000000FF, gBorderInactiveRGBA = 0x000000FF;
 NSColor *gBorderColorObj = nil, *gBorderInactiveObj = nil;
 
-static int gTokWin, gTokExcl0, gTokExcl1,
+static int gTokWin,
            gTokLFlags, gTokLClose, gTokLMin, gTokLZoom, gTokLInact, gTokLGlyph,
-           gTokTFlags, gTokTColor, gTokTChrome, gTokTText, gTokTExcl0, gTokTExcl1,
-           gTokNTB0, gTokNTB1, gTokBorder, gTokBColor, gTokBColorI;
+           gTokTFlags, gTokTColor, gTokTChrome, gTokTText,
+           gTokBorder, gTokBColor, gTokBColorI;
 
 static void BRRecomputeSelfExclusion(void) {
     NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
-    const char *b = bid.UTF8String;
-    gSelfExcluded     = b ? BRBloomTest(b, gExcl0, gExcl1)         : NO;
-    gTintSelfExcluded = b ? BRBloomTest(b, gTintExcl0, gTintExcl1) : NO;
-    gSelfNoTitlebar   = b ? BRBloomTest(b, gNoTB0, gNoTB1)         : NO;
+    gSelfExcluded = gTintSelfExcluded = gSelfNoTitlebar = NO;
+    if (!bid) return;
+    // Per-app lists live in the global domain (see BRPublishFromDefaults) — readable by
+    // sandboxed apps at launch. Sync first so a change announced via the notify signal
+    // is re-read rather than served stale from cache.
+    CFPreferencesAppSynchronize(kCFPreferencesAnyApplication);
+    CFPropertyListRef v = CFPreferencesCopyValue(CFSTR("com.tweak.brutalium.lists"),
+        kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    NSDictionary *lists = (__bridge_transfer NSDictionary *)v;
+    if ([lists isKindOfClass:[NSDictionary class]]) {
+        id tb = lists[@"toolbar"], ti = lists[@"tint"], nt = lists[@"titlebar"];
+        gSelfExcluded     = [tb isKindOfClass:[NSArray class]] && [tb containsObject:bid];
+        gTintSelfExcluded = [ti isKindOfClass:[NSArray class]] && [ti containsObject:bid];
+        gSelfNoTitlebar   = [nt isKindOfClass:[NSArray class]] && [nt containsObject:bid];
+    }
 }
 
 static void BRRefreshConfig(void) {
     uint64_t w = 0; notify_get_state(gTokWin, &w);
-    bool valid = false, m = false, c = false, t = false, sl = false; double rad = 0;
-    BRUnpackWin(w, &valid, &m, &c, &t, &sl, &rad);
-    if (valid) { gMaster = m; gCorners = c; gToolbar = t; gSquareLayers = sl; gCornerRadius = rad; }
-    else       { gMaster = YES; gCorners = YES; gToolbar = YES; gSquareLayers = NO; gCornerRadius = 0.0; }
+    bool valid = false, m = false, c = false, t = false, sl = false, st = false; double rad = 0;
+    BRUnpackWin(w, &valid, &m, &c, &t, &sl, &st, &rad);
+    if (valid) { gMaster = m; gCorners = c; gToolbar = t; gSquareLayers = sl; gSquareToolbar = st; gCornerRadius = rad; }
+    else       { gMaster = YES; gCorners = YES; gToolbar = YES; gSquareLayers = NO; gSquareToolbar = NO; gCornerRadius = 0.0; }
 
-    gExcl0 = 0; notify_get_state(gTokExcl0, &gExcl0);
-    gExcl1 = 0; notify_get_state(gTokExcl1, &gExcl1);
-    gTintExcl0 = 0; notify_get_state(gTokTExcl0, &gTintExcl0);
-    gTintExcl1 = 0; notify_get_state(gTokTExcl1, &gTintExcl1);
-    gNoTB0 = 0; notify_get_state(gTokNTB0, &gNoTB0);
-    gNoTB1 = 0; notify_get_state(gTokNTB1, &gNoTB1);
     BRRecomputeSelfExclusion();
 
     uint64_t bf = 0; notify_get_state(gTokBorder, &bf);
@@ -184,8 +187,6 @@ static void BRSetup(void) {
     }
 
     notify_register_check(BR_ST_WIN,    &gTokWin);
-    notify_register_check(BR_ST_EXCL0,  &gTokExcl0);
-    notify_register_check(BR_ST_EXCL1,  &gTokExcl1);
     notify_register_check(BR_ST_LFLAGS, &gTokLFlags);
     notify_register_check(BR_ST_LCLOSE, &gTokLClose);
     notify_register_check(BR_ST_LMIN,   &gTokLMin);
@@ -196,10 +197,6 @@ static void BRSetup(void) {
     notify_register_check(BR_ST_TCOLOR, &gTokTColor);
     notify_register_check(BR_ST_TCHROME, &gTokTChrome);
     notify_register_check(BR_ST_TTEXT,  &gTokTText);
-    notify_register_check(BR_ST_TEXCL0, &gTokTExcl0);
-    notify_register_check(BR_ST_TEXCL1, &gTokTExcl1);
-    notify_register_check(BR_ST_NTB0,   &gTokNTB0);
-    notify_register_check(BR_ST_NTB1,   &gTokNTB1);
     notify_register_check(BR_ST_BORDER, &gTokBorder);
     notify_register_check(BR_ST_BCOLOR, &gTokBColor);
     notify_register_check(BR_ST_BCOLORI, &gTokBColorI);

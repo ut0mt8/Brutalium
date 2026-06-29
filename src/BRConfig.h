@@ -12,13 +12,11 @@
 extern BOOL     gMaster;        // master on/off for the whole tweak
 extern BOOL     gCorners;       // square window corners
 extern BOOL     gSquareLayers;  // square EVERY CALayer's corners (app-wide, aggressive)
+extern BOOL     gSquareToolbar; // square only toolbar-item corners (scoped)
 extern BOOL     gToolbar;       // force expanded toolbar
 extern double   gCornerRadius;  // 0 == fully square
-extern uint64_t gExcl0, gExcl1; // toolbar-exclusion bloom filter
 extern BOOL     gSelfExcluded;  // this app is on the toolbar exclusion list
-extern uint64_t gTintExcl0, gTintExcl1; // tint-exclusion bloom filter
 extern BOOL     gTintSelfExcluded;      // this app is on the tint exclusion list
-extern uint64_t gNoTB0, gNoTB1;         // no-titlebar app bloom filter
 extern BOOL     gSelfNoTitlebar;        // remove this app's titlebar entirely
 extern BOOL     gBorderEnabled, gBorderShadow;
 extern double   gBorderSize;            // border width in points (0 = none)
@@ -51,6 +49,7 @@ extern NSColor *gTintTextObj;         // precise text/label colour (cached, opaq
 // Effective gates (master AND the per-feature toggle).
 static inline BOOL BRCornersActive(void) { return gMaster && gCorners; }
 static inline BOOL BRSquareLayersActive(void) { return gMaster && gSquareLayers; }
+static inline BOOL BRSquareToolbarActive(void) { return gMaster && gSquareToolbar; }
 static inline BOOL BRToolbarActive(void) { return gMaster && gToolbar && !gSelfExcluded; }
 static inline BOOL BRLightsActive(void)  { return gMaster && gLEnabled; }
 static inline BOOL BRNoTitlebarActive(void) { return gMaster && gSelfNoTitlebar; }

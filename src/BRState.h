@@ -43,21 +43,23 @@ enum { BR_MODE_AUTO = 0, BR_MODE_LIGHT = 1, BR_MODE_DARK = 2, BR_MODE_NONE = 3 }
 #pragma mark - Window flags
 
 // bit63 valid · bit0 master · bit1 corners · bit2 toolbar · bits 8..23 radius q8
-static inline uint64_t BRPackWin(BOOL master, BOOL corners, BOOL toolbar, BOOL squareLayers, double radius) {
+static inline uint64_t BRPackWin(BOOL master, BOOL corners, BOOL toolbar, BOOL squareLayers, BOOL squareToolbar, double radius) {
     uint64_t v = (1ULL << 63);
     if (master)  v |= 1ULL;
     if (corners) v |= 2ULL;
     if (toolbar) v |= 4ULL;
-    if (squareLayers) v |= 8ULL;
+    if (squareLayers)  v |= 8ULL;
+    if (squareToolbar) v |= 16ULL;
     uint16_t rq = (uint16_t)lround(fmax(0.0, radius) * 256.0);
     v |= ((uint64_t)rq) << 8;
     return v;
 }
-static inline void BRUnpackWin(uint64_t v, bool *valid, bool *master,
-                               bool *corners, bool *toolbar, bool *squareLayers, double *radius) {
+static inline void BRUnpackWin(uint64_t v, bool *valid, bool *master, bool *corners,
+                               bool *toolbar, bool *squareLayers, bool *squareToolbar, double *radius) {
     *valid = (v >> 63) & 1ULL; *master = v & 1ULL;
     *corners = (v >> 1) & 1ULL; *toolbar = (v >> 2) & 1ULL;
-    *squareLayers = (v >> 3) & 1ULL;
+    *squareLayers  = (v >> 3) & 1ULL;
+    *squareToolbar = (v >> 4) & 1ULL;
     *radius = (double)((v >> 8) & 0xFFFF) / 256.0;
 }
 
@@ -191,13 +193,8 @@ static inline void BRPublishFromDefaults(NSUserDefaults *d) {
     BOOL corners = [d objectForKey:@"corners.enabled"] ? [d boolForKey:@"corners.enabled"] : YES;
     BOOL toolbar = [d objectForKey:@"toolbar.enabled"] ? [d boolForKey:@"toolbar.enabled"] : YES;
     BOOL squareLayers = [d objectForKey:@"corners.layers"] ? [d boolForKey:@"corners.layers"] : NO;
+    BOOL squareToolbar = [d objectForKey:@"corners.toolbar"] ? [d boolForKey:@"corners.toolbar"] : NO;
     double cradius = [d floatForKey:@"corners.radius"];
-
-    uint64_t lo = 0, hi = 0;
-    NSArray *excl = [d arrayForKey:@"toolbar.exclude"];
-    if ([excl isKindOfClass:[NSArray class]]) {
-        for (id b in excl) if ([b isKindOfClass:[NSString class]]) BRBloomAdd([b UTF8String], &lo, &hi);
-    }
 
     BOOL lenabled = [d objectForKey:@"lights.enabled"] ? [d boolForKey:@"lights.enabled"] : YES;
     double lradius = [d floatForKey:@"lights.radius"];
@@ -215,9 +212,7 @@ static inline void BRPublishFromDefaults(NSUserDefaults *d) {
     else if (BRHexToRGBA(ia, &iv))                                   inact = iv;
     else                                                             inact = BR_AUTO_STATE;
 
-    BRSetState(BR_ST_WIN,    BRPackWin(master, corners, toolbar, squareLayers, cradius));
-    BRSetState(BR_ST_EXCL0,  lo);
-    BRSetState(BR_ST_EXCL1,  hi);
+    BRSetState(BR_ST_WIN,    BRPackWin(master, corners, toolbar, squareLayers, squareToolbar, cradius));
     BRSetState(BR_ST_LFLAGS, BRPackLFlags(lenabled, lradius, lsize));
     BRSetState(BR_ST_LCLOSE, close);
     BRSetState(BR_ST_LMIN,   mn);
@@ -248,19 +243,20 @@ static inline void BRPublishFromDefaults(NSUserDefaults *d) {
     BRSetState(BR_ST_TCHROME, tChrome); // 0 + chromeAuto flag ⇒ derive in the dylib
     BRSetState(BR_ST_TTEXT,   tText);   // applied only when textAuto is off
 
-    uint64_t telo = 0, tehi = 0;
-    NSArray *texcl = [d arrayForKey:@"tint.exclude"];
-    if ([texcl isKindOfClass:[NSArray class]])
-        for (id b in texcl) if ([b isKindOfClass:[NSString class]]) BRBloomAdd([b UTF8String], &telo, &tehi);
-    BRSetState(BR_ST_TEXCL0, telo);
-    BRSetState(BR_ST_TEXCL1, tehi);
-
-    uint64_t ntlo = 0, nthi = 0;
-    NSArray *ntb = [d arrayForKey:@"titlebar.hide"];
-    if ([ntb isKindOfClass:[NSArray class]])
-        for (id b in ntb) if ([b isKindOfClass:[NSString class]]) BRBloomAdd([b UTF8String], &ntlo, &nthi);
-    BRSetState(BR_ST_NTB0, ntlo);
-    BRSetState(BR_ST_NTB1, nthi);
+    // Per-app lists travel via ONE global-domain key (readable by every app at launch,
+    // sandboxed or not — same channel as AppleInterfaceStyle) rather than notify Bloom
+    // filters: exact string match, no false positives, inspectable with
+    // `defaults read -g com.tweak.brutalium.lists`. Trade-off: exclude changes apply on
+    // the target app's NEXT launch, not live (the notify signal still fires, and the
+    // dylib re-reads on it, but the global-domain cache may not refresh until relaunch).
+    NSDictionary *brLists = @{
+        @"toolbar":  ([d arrayForKey:@"toolbar.exclude"] ?: @[]),
+        @"tint":     ([d arrayForKey:@"tint.exclude"]    ?: @[]),
+        @"titlebar": ([d arrayForKey:@"titlebar.hide"]   ?: @[]),
+    };
+    CFPreferencesSetValue(CFSTR("com.tweak.brutalium.lists"), (__bridge CFPropertyListRef)brLists,
+                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    CFPreferencesSynchronize(kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
 
     BOOL bEnabled = [d objectForKey:@"border.enabled"] ? [d boolForKey:@"border.enabled"] : NO;
     BOOL bShadow  = [d objectForKey:@"border.shadow"]  ? [d boolForKey:@"border.shadow"]  : YES;

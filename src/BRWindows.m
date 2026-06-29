@@ -16,6 +16,32 @@
 
 #pragma mark - Appliers
 
+// Square only the toolbar items' corners (a scoped alternative to the global
+// `corners layers` swizzle): find the toolbar container by class name and zero the
+// cornerRadius on every layer in its subtree. Re-applied on each window event.
+static void BRSquareLayerCorners(CALayer *l) {
+    if (!l) return;
+    if (l.cornerRadius > 0.0) l.cornerRadius = 0.0;
+    if (l.mask && l.mask.cornerRadius > 0.0) l.mask.cornerRadius = 0.0;
+    for (CALayer *s in l.sublayers) BRSquareLayerCorners(s);
+}
+static void BRSquareViewSubtree(NSView *v) {
+    for (NSView *sv in v.subviews) {
+        if (sv.layer) BRSquareLayerCorners(sv.layer);
+        BRSquareViewSubtree(sv);
+    }
+}
+static void BRSquareToolbars(NSView *v) {
+    if (strstr(class_getName(object_getClass(v)), "Toolbar")) { BRSquareViewSubtree(v); return; }
+    for (NSView *sv in v.subviews) BRSquareToolbars(sv);
+}
+static void BRApplyToolbarCorners(NSWindow *w) {
+    if (!BRSquareToolbarActive()) return;
+    NSView *frame = w.contentView.superview;
+    if (!frame) return;
+    @try { BRSquareToolbars(frame); } @catch (__unused NSException *e) {}
+}
+
 // A genuine top-level main window — not a panel, inspector, sheet, popover, or
 // child window. Used to scope titlebar removal so auxiliary windows keep theirs.
 static BOOL BRWindowIsMain(NSWindow *w) {
@@ -99,6 +125,8 @@ void BRWindowsApply(NSWindow *w) {
 
     // Configurable border (owned sublayer) + shadow.
     BRApplyBorder(w);
+    // Optional scoped toolbar-item corner squaring.
+    BRApplyToolbarCorners(w);
 }
 
 void BRWindowsApplyAll(void) {
