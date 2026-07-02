@@ -23,6 +23,7 @@
 #define BR_ST_BORDER  "com.tweak.brutalium.st.border"  // window border: enabled|shadow|size
 #define BR_ST_BCOLOR  "com.tweak.brutalium.st.bcolor"  // 0xRRGGBBAA border colour (active)
 #define BR_ST_BCOLORI "com.tweak.brutalium.st.bcolori" // 0xRRGGBBAA border colour (inactive; 0 ⇒ use active)
+#define BR_ST_GLASS   "com.tweak.brutalium.st.glass"   // de-glass: valid|flatten|colorAuto|RGBA
 #define BR_ST_LFLAGS  "com.tweak.brutalium.st.lflags"  // lights: enabled|radius|size
 #define BR_ST_LCLOSE  "com.tweak.brutalium.st.lclose"  // 0xRRGGBBAA
 #define BR_ST_LMIN    "com.tweak.brutalium.st.lmin"
@@ -77,6 +78,21 @@ static inline void BRUnpackBorder(uint64_t v, bool *valid, bool *enabled, bool *
     *enabled = v & 1ULL;
     *shadow = (v >> 1) & 1ULL;
     *size = (double)((v >> 8) & 0xFF);
+}
+
+// De-glass: bit63 valid · bit0 flatten · bit1 colorAuto · bits 16..47 fill RGBA
+static inline uint64_t BRPackGlass(BOOL flatten, BOOL colorAuto, uint32_t rgba) {
+    uint64_t v = (1ULL << 63);
+    if (flatten)   v |= 1ULL;
+    if (colorAuto) v |= 2ULL;
+    v |= ((uint64_t)rgba) << 16;
+    return v;
+}
+static inline void BRUnpackGlass(uint64_t v, bool *valid, bool *flatten, bool *colorAuto, uint32_t *rgba) {
+    *valid     = (v >> 63) & 1ULL;
+    *flatten   = v & 1ULL;
+    *colorAuto = (v >> 1) & 1ULL;
+    *rgba      = (uint32_t)((v >> 16) & 0xFFFFFFFFULL);
 }
 
 #pragma mark - Lights flags
@@ -253,6 +269,7 @@ static inline void BRPublishFromDefaults(NSUserDefaults *d) {
         @"toolbar":  ([d arrayForKey:@"toolbar.exclude"] ?: @[]),
         @"tint":     ([d arrayForKey:@"tint.exclude"]    ?: @[]),
         @"titlebar": ([d arrayForKey:@"titlebar.hide"]   ?: @[]),
+        @"glass":    ([d arrayForKey:@"glass.exclude"]   ?: @[]),
     };
     CFPreferencesSetValue(CFSTR("com.tweak.brutalium.lists"), (__bridge CFPropertyListRef)brLists,
                           kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
@@ -269,6 +286,13 @@ static inline void BRPublishFromDefaults(NSUserDefaults *d) {
     NSString *biStr = [d stringForKey:@"border.colorInactive"];
     if (biStr) BRHexToRGBA(biStr, &bColorI);
     BRSetState(BR_ST_BCOLORI, bColorI);
+
+    BOOL gFlatten = [d objectForKey:@"glass.flatten"] ? [d boolForKey:@"glass.flatten"] : NO;
+    NSString *gcol = [d stringForKey:@"glass.color"] ?: @"auto";
+    BOOL gAuto = ([gcol caseInsensitiveCompare:@"auto"] == NSOrderedSame);
+    uint32_t gRGBA = 0xFFFFFFFF;                       // only used when !auto
+    if (!gAuto) { uint32_t v; if (BRHexToRGBA(gcol, &v)) gRGBA = v; else gAuto = YES; }
+    BRSetState(BR_ST_GLASS, BRPackGlass(gFlatten, gAuto, gRGBA));
     notify_post(BR_NOTIFY_CHANGED);
 }
 

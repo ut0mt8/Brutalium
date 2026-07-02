@@ -8,6 +8,7 @@ UI brutally square and optionally recolours and reshapes it for every app:
 - **Expanded toolbar style** forced everywhere, with a per-app exclusion list.
 - **Square traffic-light buttons** (close / minimise / zoom) with configurable colours, themes, size, and a hover glyph.
 - **System tint**: recolour the whole UI to any colour background, chrome, precise text, toolbar icons with themes and a per-app exclusion list.
+- **De-glass**: flatten Tahoe's Liquid Glass (`NSGlassEffectView`) to an opaque panel window-background or a fixed colour with a per-app exclusion list.
 - **Titlebar removal** per app (keeps the toolbar where there is one).
 - **Window borders** with separate active/inactive colours, width, and a drop-shadow toggle.
 
@@ -104,6 +105,13 @@ brutalium tint wallpaper off             # leave the desktop alone (default)
 brutalium tint exclude add com.foo.bar   # never tint this app
 brutalium tint exclude list
 
+brutalium glass off                      # flatten glass to an opaque panel
+brutalium glass on                       # restore glass (default)
+brutalium glass color #1E1E28            # fixed fill colour...
+brutalium glass color auto               # ...or the window background (default)
+brutalium glass exclude add com.foo.bar  # leave this app's glass alone
+brutalium glass exclude list
+
 brutalium status                         # show all current settings
 brutalium publish                        # apply now (also runs at login)
 ```
@@ -135,9 +143,11 @@ so hover highlights survive. Tint stays out of the screenshot UI and, unless
 `tint wallpaper on`, the desktop process. Excluding a previously-tinted app restores its
 original window opacity and background.
 
+**De-glass.** `NSGlassEffectView` isn't layer-backed and renders its content *through* the glass, so there's no filter to strip or backing layer to recolour. Brutalium instead paints the view's `ContentHolderView` layer opaque at the view's own corner radius a solid rounded panel, content intact. It targets the public glass class only; system chrome drawn by private glass views is unaffected. Changes apply live to open windows.
+
 **Config transport.** Live settings (toggles, colours, sizes, modes) travel over Darwin
 notify state so they reach sandboxed apps and apply instantly. The per-app *lists*
-(toolbar exclude, tint exclude, titlebar hide) instead live in a single global-domain
+(toolbar exclude, tint exclude, titlebar hide, glass exclude) instead live in a single global-domain
 key, `com.tweak.brutalium.lists` the same channel every app reads `AppleInterfaceStyle`
 from, so it's readable inside any sandbox. That gives exact string matching (no Bloom
 false positives) and an inspectable config (`defaults read -g com.tweak.brutalium.lists`),

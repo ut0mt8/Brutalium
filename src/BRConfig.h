@@ -46,6 +46,13 @@ extern NSColor *gTintColorObj;        // main background (cached, opaque)
 extern NSColor *gTintChromeObj;       // sidebar/titlebar/toolbar (cached, opaque)
 extern NSColor *gTintTextObj;         // precise text/label colour (cached, opaque)
 
+// Glass module config (de-glass NSGlassEffectView)
+extern BOOL     gGlassFlatten;        // YES ⇒ flatten glass panels to an opaque fill
+extern BOOL     gGlassColorAuto;      // YES ⇒ use windowBackgroundColor; NO ⇒ gGlassColorObj
+extern uint32_t gGlassColorRGBA;      // fixed fill colour (when !auto)
+extern NSColor *gGlassColorObj;       // cached fixed fill colour (nil ⇒ auto)
+extern BOOL     gGlassSelfExcluded;   // this app is on the glass exclusion list
+
 // Effective gates (master AND the per-feature toggle).
 static inline BOOL BRCornersActive(void) { return gMaster && gCorners; }
 static inline BOOL BRSquareLayersActive(void) { return gMaster && gSquareLayers; }
@@ -54,6 +61,8 @@ static inline BOOL BRToolbarActive(void) { return gMaster && gToolbar && !gSelfE
 static inline BOOL BRLightsActive(void)  { return gMaster && gLEnabled; }
 static inline BOOL BRNoTitlebarActive(void) { return gMaster && gSelfNoTitlebar; }
 static inline BOOL BRBorderActive(void)  { return gMaster && gBorderEnabled; }
+// De-glass applies everywhere the feature is on, except apps on the glass exclude list.
+static inline BOOL BRGlassActive(void) { return gMaster && gGlassFlatten && !gGlassSelfExcluded; }
 // Tint stays out of the screenshot UI, and out of the wallpaper process unless opted in.
 static inline BOOL BRTintActive(void) {
     return gMaster && gTintEnabled && !gTintExcluded && !gTintSelfExcluded &&
@@ -101,5 +110,9 @@ void BRLightsRefreshAll(BOOL forceRedraw);
 void BRTintArm(void);                    // install NSColor + NSVisualEffectView overrides
 void BRTintApply(NSWindow *w);           // appearance + opaque backdrop for one window
 void BRTintRefreshAll(void);
+
+// Glass module (BRGlass.m)
+void BRGlassArm(void);                   // hook -[NSGlassEffectView layout]
+void BRGlassRefreshAll(void);            // re-apply/restore across live windows
 
 #endif /* BRCONFIG_H */

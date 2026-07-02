@@ -41,6 +41,11 @@ BOOL     gTintTextAuto = YES;
 BOOL     gTintIcons = NO;
 uint32_t gTintColorRGBA = 0x1E1E28FF, gTintChromeRGBA = 0x2C2C3CFF, gTintTextRGBA = 0xE6E6E6FF;
 NSColor *gTintColorObj = nil, *gTintChromeObj = nil, *gTintTextObj = nil;
+
+BOOL     gGlassFlatten = NO, gGlassColorAuto = YES;
+uint32_t gGlassColorRGBA = 0xFFFFFFFF;
+NSColor *gGlassColorObj = nil;
+BOOL     gGlassSelfExcluded = NO;
 BOOL     gTintSelfExcluded = NO;
 BOOL     gSelfNoTitlebar = NO;
 BOOL     gBorderEnabled = NO, gBorderShadow = YES;
@@ -51,13 +56,13 @@ NSColor *gBorderColorObj = nil, *gBorderInactiveObj = nil;
 static int gTokWin,
            gTokLFlags, gTokLClose, gTokLMin, gTokLZoom, gTokLInact, gTokLGlyph,
            gTokTFlags, gTokTColor, gTokTChrome, gTokTText,
-           gTokBorder, gTokBColor, gTokBColorI;
+           gTokBorder, gTokBColor, gTokBColorI, gTokGlass;
 
 static void BRRecomputeSelfExclusion(void) {
     NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
     gSelfExcluded = gTintSelfExcluded = gSelfNoTitlebar = NO;
-    if (!bid) return;
-    // Per-app lists live in the global domain (see BRPublishFromDefaults) — readable by
+    gGlassSelfExcluded = NO;
+    if (!bid) return;    // Per-app lists live in the global domain (see BRPublishFromDefaults) — readable by
     // sandboxed apps at launch. Sync first so a change announced via the notify signal
     // is re-read rather than served stale from cache.
     CFPreferencesAppSynchronize(kCFPreferencesAnyApplication);
@@ -65,10 +70,11 @@ static void BRRecomputeSelfExclusion(void) {
         kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
     NSDictionary *lists = (__bridge_transfer NSDictionary *)v;
     if ([lists isKindOfClass:[NSDictionary class]]) {
-        id tb = lists[@"toolbar"], ti = lists[@"tint"], nt = lists[@"titlebar"];
+        id tb = lists[@"toolbar"], ti = lists[@"tint"], nt = lists[@"titlebar"], gl = lists[@"glass"];
         gSelfExcluded     = [tb isKindOfClass:[NSArray class]] && [tb containsObject:bid];
         gTintSelfExcluded = [ti isKindOfClass:[NSArray class]] && [ti containsObject:bid];
         gSelfNoTitlebar   = [nt isKindOfClass:[NSArray class]] && [nt containsObject:bid];
+        gGlassSelfExcluded = [gl isKindOfClass:[NSArray class]] && [gl containsObject:bid];
     }
 }
 
@@ -86,6 +92,13 @@ static void BRRefreshConfig(void) {
     BRUnpackBorder(bf, &bvalid, &ben, &bsh, &bsz);
     if (bvalid) { gBorderEnabled = ben; gBorderShadow = bsh; gBorderSize = bsz; }
     else        { gBorderEnabled = NO; gBorderShadow = YES; gBorderSize = 1.0; }
+
+    uint64_t gf = 0; notify_get_state(gTokGlass, &gf);
+    bool gvalid = false, gfl = false, gauto = true; uint32_t grgba = 0xFFFFFFFF;
+    BRUnpackGlass(gf, &gvalid, &gfl, &gauto, &grgba);
+    if (gvalid) { gGlassFlatten = gfl; gGlassColorAuto = gauto; gGlassColorRGBA = grgba; }
+    else        { gGlassFlatten = NO; gGlassColorAuto = YES; gGlassColorRGBA = 0xFFFFFFFF; }
+    gGlassColorObj = gGlassColorAuto ? nil : BRMakeColor(gGlassColorRGBA);
     uint64_t bc = 0; notify_get_state(gTokBColor, &bc);
     gBorderRGBA = bc ? (uint32_t)bc : 0x000000FF;
     gBorderColorObj = BRMakeColor(gBorderRGBA);
@@ -152,6 +165,7 @@ static void BRApplyAll(BOOL forceLightsRedraw) {
     BRWindowsApplyAll();
     BRTintRefreshAll();
     BRLightsRefreshAll(forceLightsRedraw);
+    BRGlassRefreshAll();
 }
 
 #pragma mark - Process gating
@@ -200,12 +214,14 @@ static void BRSetup(void) {
     notify_register_check(BR_ST_BORDER, &gTokBorder);
     notify_register_check(BR_ST_BCOLOR, &gTokBColor);
     notify_register_check(BR_ST_BCOLORI, &gTokBColorI);
+    notify_register_check(BR_ST_GLASS,   &gTokGlass);
     BRRefreshConfig();
 
     // Arm every feature's swizzles — ONLY here, i.e. only in app processes.
     BRWindowsArm();
     BRLightsArm();
     BRTintArm();
+    BRGlassArm();
 
     NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
     void (^onWindow)(NSNotification *) = ^(NSNotification *n) {

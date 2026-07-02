@@ -55,6 +55,12 @@ static void usage(void) {
         "  tint exclude remove <bundleid>\n"
         "  tint exclude list\n"
         "\n"
+        "  glass off|on                   Flatten Liquid Glass to an opaque panel (off = flatten)\n"
+        "  glass color <#RRGGBB|auto>     Fill colour (auto = window background)\n"
+        "  glass exclude add <bundleid>   Leave this app's glass alone\n"
+        "  glass exclude remove <bundleid>\n"
+        "  glass exclude list\n"
+        "\n"
         "  status\n"
         "  publish\n");
 }
@@ -111,6 +117,9 @@ int main(int argc, const char *argv[]) {
             [d setFloat:1.0f  forKey:@"border.size"];
             [d setObject:@"#000000" forKey:@"border.color"];
             [d setBool:YES    forKey:@"border.shadow"];
+            [d setBool:NO       forKey:@"glass.flatten"];
+            [d setObject:@"auto" forKey:@"glass.color"];
+            [d setObject:@[]     forKey:@"glass.exclude"];
         }
 
         BOOL changed = YES;
@@ -295,6 +304,38 @@ int main(int argc, const char *argv[]) {
             else { usage(); return 1; }
         }
 
+        else if (strcmp(cmd, "glass") == 0 && argc >= 3) {
+            const char *sub = argv[2];
+            if (strcmp(sub, "off") == 0)      [d setBool:YES forKey:@"glass.flatten"]; // off = flatten
+            else if (strcmp(sub, "on") == 0)  [d setBool:NO  forKey:@"glass.flatten"]; // on  = keep glass
+            else if (strcmp(sub, "color") == 0 && argc >= 4) {
+                NSString *val = [NSString stringWithUTF8String:argv[3]];
+                if ([val caseInsensitiveCompare:@"auto"] == NSOrderedSame) {
+                    [d setObject:@"auto" forKey:@"glass.color"];
+                } else {
+                    uint32_t v;
+                    if (!BRHexToRGBA(val, &v)) { fprintf(stderr, "error: glass color must be #RRGGBB or auto\n"); return 1; }
+                    [d setObject:val forKey:@"glass.color"];
+                }
+            }
+            else if (strcmp(sub, "exclude") == 0) {
+                NSMutableArray *list = [[d arrayForKey:@"glass.exclude"] mutableCopy] ?: [NSMutableArray array];
+                if (argc >= 4 && strcmp(argv[3], "list") == 0) {
+                    printf("Glass exclusions:\n");
+                    if (list.count == 0) printf("  (none)\n");
+                    for (NSString *b in list) printf("  %s\n", b.UTF8String);
+                    return 0;
+                }
+                if (argc < 5) { fprintf(stderr, "error: glass exclude add|remove|list <bundleid>\n"); return 1; }
+                NSString *bid = [NSString stringWithUTF8String:argv[4]];
+                if (strcmp(argv[3], "add") == 0)         { if (![list containsObject:bid]) [list addObject:bid]; }
+                else if (strcmp(argv[3], "remove") == 0) { [list removeObject:bid]; }
+                else { fprintf(stderr, "error: glass exclude add|remove|list\n"); return 1; }
+                [d setObject:list forKey:@"glass.exclude"];
+            }
+            else { usage(); return 1; }
+        }
+
         else if (strcmp(cmd, "status") == 0) {
             changed = NO;
             NSArray *ex = [d arrayForKey:@"toolbar.exclude"];
@@ -337,6 +378,10 @@ int main(int argc, const char *argv[]) {
                    [d boolForKey:@"tint.wallpaper"] ? "on" : "off");
             printf("    excluded apps: %lu\n",
                    (unsigned long)([d arrayForKey:@"tint.exclude"] ?: @[]).count);
+            printf("  glass          : %s  (fill %s, excl %lu)\n",
+                   [d boolForKey:@"glass.flatten"] ? "off — flattened" : "on (default)",
+                   [([d stringForKey:@"glass.color"] ?: @"auto") UTF8String],
+                   (unsigned long)([d arrayForKey:@"glass.exclude"] ?: @[]).count);
         }
         else if (strcmp(cmd, "publish") == 0) { changed = NO; BRPublishFromDefaults(d); printf("Published.\n"); }
         else { usage(); return 1; }
