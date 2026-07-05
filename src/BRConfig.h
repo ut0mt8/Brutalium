@@ -53,6 +53,11 @@ extern uint32_t gGlassColorRGBA;      // fixed fill colour (when !auto)
 extern NSColor *gGlassColorObj;       // cached fixed fill colour (nil ⇒ auto)
 extern BOOL     gGlassSelfExcluded;   // this app is on the glass exclusion list
 
+// Titlebar strip colour (custom-titlebar / window-manager feature)
+extern BOOL     gTitlebarColorEnabled;
+extern uint32_t gTitlebarColorRGBA;
+extern NSColor *gTitlebarColorObj;    // cached fill colour for the titlebar strip
+
 // Effective gates (master AND the per-feature toggle).
 static inline BOOL BRCornersActive(void) { return gMaster && gCorners; }
 static inline BOOL BRSquareLayersActive(void) { return gMaster && gSquareLayers; }
@@ -63,6 +68,8 @@ static inline BOOL BRNoTitlebarActive(void) { return gMaster && gSelfNoTitlebar;
 static inline BOOL BRBorderActive(void)  { return gMaster && gBorderEnabled; }
 // De-glass applies everywhere the feature is on, except apps on the glass exclude list.
 static inline BOOL BRGlassActive(void) { return gMaster && gGlassFlatten && !gGlassSelfExcluded; }
+// Titlebar strip colour applies to standard windows whenever enabled.
+static inline BOOL BRTitlebarColorActive(void) { return gMaster && gTitlebarColorEnabled; }
 // Tint stays out of the screenshot UI, and out of the wallpaper process unless opted in.
 static inline BOOL BRTintActive(void) {
     return gMaster && gTintEnabled && !gTintExcluded && !gTintSelfExcluded &&
@@ -114,5 +121,8 @@ void BRTintRefreshAll(void);
 // Glass module (BRGlass.m)
 void BRGlassArm(void);                   // hook -[NSGlassEffectView layout]
 void BRGlassRefreshAll(void);            // re-apply/restore across live windows
+
+// Titlebar module (BRTitlebar.m)
+void BRTitlebarApplyColor(NSWindow *w);  // colour the titlebar strip (or restore) for one window
 
 #endif /* BRCONFIG_H */

@@ -1,6 +1,6 @@
 # Brutalium
 
-A macOS [Ammonia](https://github.com/CoreBedtime/ammonia) or playground tweak that makes the whole
+A macOS [Ammonia/Playground](https://github.com/CoreBedtime) tweak that makes the whole
 UI brutally square and optionally recolours and reshapes it for every app:
 
 - **Square window corners** (configurable radius; `0` = fully square) + flatter titlebar.
@@ -9,6 +9,7 @@ UI brutally square and optionally recolours and reshapes it for every app:
 - **Square traffic-light buttons** (close / minimise / zoom) with configurable colours, themes, size, and a hover glyph.
 - **System tint**: recolour the whole UI to any colour background, chrome, precise text, toolbar icons with themes and a per-app exclusion list.
 - **De-glass**: flatten Tahoe's Liquid Glass (`NSGlassEffectView`) to an opaque panel window-background or a fixed colour with a per-app exclusion list.
+- **Custom titlebar**: colour the titlebar strip a plain colour (traffic lights + title kept, toolbar left alone) a draggable custom window frame alongside the border.
 - **Titlebar removal** per app (keeps the toolbar where there is one).
 - **Window borders** with separate active/inactive colours, width, and a drop-shadow toggle.
 
@@ -75,6 +76,8 @@ brutalium toolbar exclude list
 brutalium titlebar hide com.foo.bar      # remove titlebar; keeps the toolbar if present
 brutalium titlebar show com.foo.bar
 brutalium titlebar list
+brutalium titlebar color #1E1E28         # colour the titlebar strip
+brutalium titlebar color off             # stop colouring
 
 # Window borders -----------------------------------------------------------
 brutalium border on
@@ -133,7 +136,14 @@ that a tweak can't reclaim, so removing it there would only leave an orphan gap.
 **Borders.** Drawn on the window frame's own layer (so it never intercepts clicks) and
 re-coloured on every focus/app-activation change. Use clearly different active/inactive
 colours to see the switch. Follows the squared/rounded shape; `shadow` toggles the
-window drop shadow.
+window drop shadow. A CALayer border is always drawn *inward* from the edge, which would
+overlap the content view, so the border reserves its space: the titlebar container and
+content view are inset inward by the border width and the border sits in the exposed
+margin a real ring around everything, with content and traffic lights inside it. The
+inset is recomputed on every window event, so it tracks live resizes, and the natural
+full-bleed layout is restored when the border is off. Standard `NSThemeFrame` windows
+only; apps that pin their content view with Auto Layout (rather than letting it
+autoresize) can override the inset, and there a thick border may still overlap.
 
 **Tint.** Background recolouring works app-wide via the `NSColor` swizzle (no per-window
 work). The precise `text` colour is base-agnostic pair it with `mode none` to fully
@@ -144,6 +154,8 @@ so hover highlights survive. Tint stays out of the screenshot UI and, unless
 original window opacity and background.
 
 **De-glass.** `NSGlassEffectView` isn't layer-backed and renders its content *through* the glass, so there's no filter to strip or backing layer to recolour. Brutalium instead paints the view's `ContentHolderView` layer opaque at the view's own corner radius a solid rounded panel, content intact. It targets the public glass class only; system chrome drawn by private glass views is unaffected. Changes apply live to open windows.
+
+**Custom titlebar.** The titlebar background is glass, so we don't recolour it we insert an opaque, draggable bar into `NSTitlebarView` below the title (in front of the backdrops, behind the controls), sized to just the strip above any toolbar/format-bar accessory. Traffic lights and title stay live on top; the toolbar keeps its own look. Standard `NSThemeFrame` windows only.
 
 **Config transport.** Live settings (toggles, colours, sizes, modes) travel over Darwin
 notify state so they reach sandboxed apps and apply instantly. The per-app *lists*

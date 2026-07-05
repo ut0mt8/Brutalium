@@ -54,6 +54,45 @@ static BOOL BRWindowIsMain(NSWindow *w) {
     return YES;
 }
 
+// Reserve space for the border instead of drawing over content. A CALayer border is
+// always drawn INWARD from the layer edge, so a thick border on the frame overlaps the
+// content view (which reaches the window edge). To keep content visible we inset the
+// titlebar container and the content view inward by the border width — the frame layer's
+// border then sits in the exposed margin. Re-applied on every window event so it tracks
+// live resizes; restores the natural layout (b = 0) when the border is off. Standard
+// NSThemeFrame windows only; apps that pin their content view with Auto Layout may
+// override the inset.
+static void BRLayoutForBorder(NSWindow *w) {
+    NSView *frame = w.contentView.superview;
+    if (!frame || ![frame isKindOfClass:NSClassFromString(@"NSThemeFrame")]) return;
+    NSView *content = w.contentView;
+    if (!content) return;
+
+    NSView *cont = nil;
+    for (NSView *sv in frame.subviews)
+        if (strstr(class_getName(object_getClass(sv)), "TitlebarContainer")) { cont = sv; break; }
+
+    NSRect fb = frame.bounds;
+    CGFloat W = NSWidth(fb), H = NSHeight(fb);
+    CGFloat b = BRBorderActive() ? gBorderSize : 0.0;
+    if (b < 0.0) b = 0.0;
+    if (b * 2.0 >= W - 40.0 || b * 2.0 >= H - 40.0) b = 0.0;   // too big for this window — skip inset
+
+    CGFloat top = cont ? NSHeight(cont.frame) : 0.0;            // titlebar+toolbar band (height preserved across applies)
+    BOOL fullSize = (w.styleMask & NSWindowStyleMaskFullSizeContentView) != 0;
+
+    @try {
+        if (cont) {
+            NSRect ct = NSMakeRect(b, H - b - top, W - 2.0*b, top);
+            if (!NSEqualRects(cont.frame, ct)) cont.frame = ct;
+        }
+        NSRect cv = fullSize ? NSMakeRect(b, b, W - 2.0*b, H - 2.0*b)
+                             : NSMakeRect(b, b, W - 2.0*b, (H - b - top) - b);
+        if (cv.size.width > 1.0 && cv.size.height > 1.0 && !NSEqualRects(content.frame, cv))
+            content.frame = cv;
+    } @catch (__unused NSException *e) {}
+}
+
 // Border drawn directly on the window frame's own layer. An earlier version used a
 // separate full-window sublayer, but a covering sublayer intercepts clicks in some
 // windows (Catalyst apps, sheets), so we use the frame's own layer border instead —
@@ -66,6 +105,7 @@ static void BRApplyBorder(NSWindow *w) {
     @try {
         if (!BRBorderActive()) {
             if (frame.layer && frame.layer.borderWidth > 0.0) frame.layer.borderWidth = 0.0;
+            BRLayoutForBorder(w);      // restore natural layout
             return;
         }
         frame.wantsLayer = YES;
@@ -74,6 +114,7 @@ static void BRApplyBorder(NSWindow *w) {
         frame.layer.borderColor  = (activeWin ? gBorderColorObj : gBorderInactiveObj).CGColor;
         frame.layer.cornerRadius = (BRCornersActive() && gCornerRadius <= 0.0) ? 0.0 : gCornerRadius;
         w.hasShadow = gBorderShadow;
+        BRLayoutForBorder(w);          // inset content so the border doesn't cover it
     } @catch (__unused NSException *e) {}
 }
 
@@ -125,6 +166,8 @@ void BRWindowsApply(NSWindow *w) {
 
     // Configurable border (owned sublayer) + shadow.
     BRApplyBorder(w);
+    // Custom titlebar strip colour (window-manager feature).
+    BRTitlebarApplyColor(w);
     // Optional scoped toolbar-item corner squaring.
     BRApplyToolbarCorners(w);
 }

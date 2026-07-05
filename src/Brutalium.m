@@ -46,6 +46,10 @@ BOOL     gGlassFlatten = NO, gGlassColorAuto = YES;
 uint32_t gGlassColorRGBA = 0xFFFFFFFF;
 NSColor *gGlassColorObj = nil;
 BOOL     gGlassSelfExcluded = NO;
+
+BOOL     gTitlebarColorEnabled = NO;
+uint32_t gTitlebarColorRGBA = 0x1E1E28FF;
+NSColor *gTitlebarColorObj = nil;
 BOOL     gTintSelfExcluded = NO;
 BOOL     gSelfNoTitlebar = NO;
 BOOL     gBorderEnabled = NO, gBorderShadow = YES;
@@ -56,7 +60,7 @@ NSColor *gBorderColorObj = nil, *gBorderInactiveObj = nil;
 static int gTokWin,
            gTokLFlags, gTokLClose, gTokLMin, gTokLZoom, gTokLInact, gTokLGlyph,
            gTokTFlags, gTokTColor, gTokTChrome, gTokTText,
-           gTokBorder, gTokBColor, gTokBColorI, gTokGlass;
+           gTokBorder, gTokBColor, gTokBColorI, gTokGlass, gTokTbar;
 
 static void BRRecomputeSelfExclusion(void) {
     NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
@@ -99,6 +103,13 @@ static void BRRefreshConfig(void) {
     if (gvalid) { gGlassFlatten = gfl; gGlassColorAuto = gauto; gGlassColorRGBA = grgba; }
     else        { gGlassFlatten = NO; gGlassColorAuto = YES; gGlassColorRGBA = 0xFFFFFFFF; }
     gGlassColorObj = gGlassColorAuto ? nil : BRMakeColor(gGlassColorRGBA);
+
+    uint64_t tb = 0; notify_get_state(gTokTbar, &tb);
+    bool tbvalid = false, tben = false; uint32_t tbrgba = 0x1E1E28FF;
+    BRUnpackTbar(tb, &tbvalid, &tben, &tbrgba);
+    if (tbvalid) { gTitlebarColorEnabled = tben; gTitlebarColorRGBA = tbrgba; }
+    else         { gTitlebarColorEnabled = NO;  gTitlebarColorRGBA = 0x1E1E28FF; }
+    gTitlebarColorObj = BRMakeColor(gTitlebarColorRGBA);
     uint64_t bc = 0; notify_get_state(gTokBColor, &bc);
     gBorderRGBA = bc ? (uint32_t)bc : 0x000000FF;
     gBorderColorObj = BRMakeColor(gBorderRGBA);
@@ -215,6 +226,7 @@ static void BRSetup(void) {
     notify_register_check(BR_ST_BCOLOR, &gTokBColor);
     notify_register_check(BR_ST_BCOLORI, &gTokBColorI);
     notify_register_check(BR_ST_GLASS,   &gTokGlass);
+    notify_register_check(BR_ST_TBAR,    &gTokTbar);
     BRRefreshConfig();
 
     // Arm every feature's swizzles — ONLY here, i.e. only in app processes.

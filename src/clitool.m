@@ -28,6 +28,7 @@ static void usage(void) {
         "  titlebar hide <bundleid>       Remove the titlebar entirely for this app\n"
         "  titlebar show <bundleid>       Stop removing it\n"
         "  titlebar list\n"
+        "  titlebar color <#RRGGBB|off>   Colour the titlebar strip (leaves the toolbar alone)\n"
         "\n"
         "  border on | off                Draw a border on every window\n"
         "  border size <points>           Border width\n"
@@ -120,6 +121,8 @@ int main(int argc, const char *argv[]) {
             [d setBool:NO       forKey:@"glass.flatten"];
             [d setObject:@"auto" forKey:@"glass.color"];
             [d setObject:@[]     forKey:@"glass.exclude"];
+            [d setBool:NO       forKey:@"titlebar.color.enabled"];
+            [d setObject:@"#1E1E28" forKey:@"titlebar.color"];
         }
 
         BOOL changed = YES;
@@ -156,19 +159,31 @@ int main(int argc, const char *argv[]) {
         }
 
         else if (strcmp(cmd, "titlebar") == 0 && argc >= 3) {
-            NSMutableArray *list = [[d arrayForKey:@"titlebar.hide"] mutableCopy] ?: [NSMutableArray array];
-            if (strcmp(argv[2], "list") == 0) {
-                printf("Titlebar removed for:\n");
-                if (list.count == 0) printf("  (none)\n");
-                for (NSString *b in list) printf("  %s\n", b.UTF8String);
-                return 0;
+            if (strcmp(argv[2], "color") == 0 && argc >= 4) {
+                if (strcmp(argv[3], "off") == 0) {
+                    [d setBool:NO forKey:@"titlebar.color.enabled"];
+                } else {
+                    NSString *val = [NSString stringWithUTF8String:argv[3]];
+                    uint32_t v;
+                    if (!BRHexToRGBA(val, &v)) { fprintf(stderr, "error: titlebar color must be #RRGGBB or off\n"); return 1; }
+                    [d setBool:YES forKey:@"titlebar.color.enabled"];
+                    [d setObject:val forKey:@"titlebar.color"];
+                }
+            } else {
+                NSMutableArray *list = [[d arrayForKey:@"titlebar.hide"] mutableCopy] ?: [NSMutableArray array];
+                if (strcmp(argv[2], "list") == 0) {
+                    printf("Titlebar removed for:\n");
+                    if (list.count == 0) printf("  (none)\n");
+                    for (NSString *b in list) printf("  %s\n", b.UTF8String);
+                    return 0;
+                }
+                if (argc < 4) { fprintf(stderr, "error: titlebar hide|show|list <bundleid>\n"); return 1; }
+                NSString *bid = [NSString stringWithUTF8String:argv[3]];
+                if (strcmp(argv[2], "hide") == 0)      { if (![list containsObject:bid]) [list addObject:bid]; }
+                else if (strcmp(argv[2], "show") == 0) { [list removeObject:bid]; }
+                else { fprintf(stderr, "error: titlebar hide|show|list <bundleid> | titlebar color <#RRGGBB|off>\n"); return 1; }
+                [d setObject:list forKey:@"titlebar.hide"];
             }
-            if (argc < 4) { fprintf(stderr, "error: titlebar hide|show|list <bundleid>\n"); return 1; }
-            NSString *bid = [NSString stringWithUTF8String:argv[3]];
-            if (strcmp(argv[2], "hide") == 0)      { if (![list containsObject:bid]) [list addObject:bid]; }
-            else if (strcmp(argv[2], "show") == 0) { [list removeObject:bid]; }
-            else { fprintf(stderr, "error: titlebar hide|show|list <bundleid>\n"); return 1; }
-            [d setObject:list forKey:@"titlebar.hide"];
         }
 
         else if (strcmp(cmd, "border") == 0 && argc >= 3) {
@@ -349,6 +364,9 @@ int main(int argc, const char *argv[]) {
             printf("  toolbar excl.  : %s\n", ex.count ? [[ex componentsJoinedByString:@", "] UTF8String] : "(none)");
             printf("  titlebar hidden: %lu app(s)\n",
                    (unsigned long)([d arrayForKey:@"titlebar.hide"] ?: @[]).count);
+            printf("  titlebar color : %s\n",
+                   [d boolForKey:@"titlebar.color.enabled"]
+                     ? [([d stringForKey:@"titlebar.color"] ?: @"#1E1E28") UTF8String] : "off");
             printf("  border         : %s  (size %.1f, color %s, inactive %s, shadow %s)\n",
                    [d boolForKey:@"border.enabled"] ? "on" : "off",
                    [d floatForKey:@"border.size"],

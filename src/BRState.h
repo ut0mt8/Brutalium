@@ -24,6 +24,7 @@
 #define BR_ST_BCOLOR  "com.tweak.brutalium.st.bcolor"  // 0xRRGGBBAA border colour (active)
 #define BR_ST_BCOLORI "com.tweak.brutalium.st.bcolori" // 0xRRGGBBAA border colour (inactive; 0 ⇒ use active)
 #define BR_ST_GLASS   "com.tweak.brutalium.st.glass"   // de-glass: valid|flatten|colorAuto|RGBA
+#define BR_ST_TBAR    "com.tweak.brutalium.st.tbar"    // titlebar strip colour: valid|enabled|RGBA
 #define BR_ST_LFLAGS  "com.tweak.brutalium.st.lflags"  // lights: enabled|radius|size
 #define BR_ST_LCLOSE  "com.tweak.brutalium.st.lclose"  // 0xRRGGBBAA
 #define BR_ST_LMIN    "com.tweak.brutalium.st.lmin"
@@ -93,6 +94,19 @@ static inline void BRUnpackGlass(uint64_t v, bool *valid, bool *flatten, bool *c
     *flatten   = v & 1ULL;
     *colorAuto = (v >> 1) & 1ULL;
     *rgba      = (uint32_t)((v >> 16) & 0xFFFFFFFFULL);
+}
+
+// Titlebar strip colour: bit63 valid · bit0 enabled · bits 16..47 RGBA
+static inline uint64_t BRPackTbar(BOOL enabled, uint32_t rgba) {
+    uint64_t v = (1ULL << 63);
+    if (enabled) v |= 1ULL;
+    v |= ((uint64_t)rgba) << 16;
+    return v;
+}
+static inline void BRUnpackTbar(uint64_t v, bool *valid, bool *enabled, uint32_t *rgba) {
+    *valid   = (v >> 63) & 1ULL;
+    *enabled = v & 1ULL;
+    *rgba    = (uint32_t)((v >> 16) & 0xFFFFFFFFULL);
 }
 
 #pragma mark - Lights flags
@@ -293,6 +307,12 @@ static inline void BRPublishFromDefaults(NSUserDefaults *d) {
     uint32_t gRGBA = 0xFFFFFFFF;                       // only used when !auto
     if (!gAuto) { uint32_t v; if (BRHexToRGBA(gcol, &v)) gRGBA = v; else gAuto = YES; }
     BRSetState(BR_ST_GLASS, BRPackGlass(gFlatten, gAuto, gRGBA));
+
+    BOOL tbEnabled = [d boolForKey:@"titlebar.color.enabled"];
+    NSString *tbcol = [d stringForKey:@"titlebar.color"] ?: @"#1E1E28";
+    uint32_t tbRGBA = 0x1E1E28FF;
+    { uint32_t v; if (BRHexToRGBA(tbcol, &v)) tbRGBA = v; }
+    BRSetState(BR_ST_TBAR, BRPackTbar(tbEnabled, tbRGBA));
     notify_post(BR_NOTIFY_CHANGED);
 }
 
