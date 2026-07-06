@@ -37,7 +37,7 @@ CFLAGS = -Wall -Wextra -O2 -fobjc-arc \
 FRAMEWORKS = -framework Foundation -framework AppKit \
              -framework QuartzCore -framework CoreFoundation
 
-DYLIB_SOURCES = $(SRC_DIR)/Brutalium.m $(SRC_DIR)/BRWindows.m $(SRC_DIR)/BRLights.m $(SRC_DIR)/BRTint.m $(SRC_DIR)/BRGlass.m $(SRC_DIR)/BRTitlebar.m ZKSwizzle/ZKSwizzle.m
+DYLIB_SOURCES = $(SRC_DIR)/Brutalium.m $(SRC_DIR)/BRWindows.m $(SRC_DIR)/BRLights.m $(SRC_DIR)/BRTint.m $(SRC_DIR)/BRGlass.m $(SRC_DIR)/BRImages.m $(SRC_DIR)/BRTitlebar.m ZKSwizzle/ZKSwizzle.m
 CLI_SOURCE    = $(SRC_DIR)/clitool.m
 
 DYLIB_FLAGS = -dynamiclib -install_name @rpath/$(DYLIB_NAME) \
@@ -59,7 +59,8 @@ $(BUILD_DIR)/$(DYLIB_NAME): | $(BUILD_DIR)
 
 $(BUILD_DIR)/$(CLI_NAME): | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(TWEAK_ARCHS) $(CLI_SOURCE) \
-		-framework Foundation -framework CoreFoundation -o $@
+		-framework Foundation -framework CoreFoundation \
+		-framework ImageIO -framework CoreGraphics -o $@
 
 install: all ## Install dylib + CLI + blacklist + LaunchAgent
 	sudo mkdir -p $(INSTALL_DIR) $(CLI_DIR)

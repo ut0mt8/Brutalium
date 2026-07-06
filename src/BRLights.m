@@ -131,6 +131,15 @@ static void FLDrawGlyph(FLType type, NSRect sq) {
 
 #pragma mark - Square renderer (shared by both draw paths)
 
+static NSString *FLRoleFor(FLType type) {
+    switch (type) {
+        case FLTypeClose: return @"light.close";
+        case FLTypeMin:   return @"light.min";
+        case FLTypeZoom:  return @"light.zoom";
+        default:          return nil;
+    }
+}
+
 static void FLDrawContent(NSButton *btn, FLType type, BOOL hover, NSRect b) {
     CGFloat adjust = gLSize;
     CGFloat side = floor(fmin(b.size.width, b.size.height)) + adjust;
@@ -139,9 +148,26 @@ static void FLDrawContent(NSButton *btn, FLType type, BOOL hover, NSRect b) {
                            NSMinY(b) + (b.size.height - side) / 2.0, side, side);
     CGFloat radius = gLRadius;
     NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:sq xRadius:radius yRadius:radius];
-    [FLFillColor(btn, type, hover) setFill];
-    [path fill];
-    if (hover) FLDrawGlyph(type, sq);
+
+    CGImageRef cg = NULL;
+    if (gLightsImageEnabled) { NSString *role = FLRoleFor(type); if (role) cg = BRImageForRole(role); }
+
+    if (cg) {
+        // Image button: clip to the button shape, dim when the window is unfocused. Draw-only —
+        // hit-testing is untouched — and we skip the hover glyph so the artwork shows cleanly.
+        NSWindow *w = btn.window;
+        BOOL key = w.isMainWindow || w.isKeyWindow;
+        CGFloat alpha = (key || hover) ? 1.0 : 0.45;
+        [NSGraphicsContext saveGraphicsState];
+        [path addClip];
+        NSImage *ni = [[NSImage alloc] initWithCGImage:cg size:sq.size];
+        [ni drawInRect:sq fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:alpha];
+        [NSGraphicsContext restoreGraphicsState];
+    } else {
+        [FLFillColor(btn, type, hover) setFill];
+        [path fill];
+        if (hover) FLDrawGlyph(type, sq);
+    }
 }
 
 static void FLDraw(NSButton *btn, FLType type) {

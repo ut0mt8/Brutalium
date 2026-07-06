@@ -21,6 +21,35 @@
 static IMP gGlassOrigLayout = NULL;
 static const void *kBRGlassPainted = &kBRGlassPainted;
 
+// --- Tiling pattern colour -------------------------------------------------
+// CALayer.contents can only stretch/crop an image (contentsGravity has no "tile"), so to repeat
+// a texture we fill the layer's backgroundColor with a CGPattern-backed colour, which tiles at the
+// image's native pixel size. The pattern owns a retained copy of the image via releaseInfo, so the
+// colour is a self-contained unit: retain the colour and the image stays alive; release it and both go.
+static void BRTileDraw(void *info, CGContextRef ctx) {
+    CGImageRef img = (CGImageRef)info;
+    CGContextDrawImage(ctx, CGRectMake(0, 0, CGImageGetWidth(img), CGImageGetHeight(img)), img);
+}
+static void BRTileRelease(void *info) { if (info) CGImageRelease((CGImageRef)info); }
+
+static CGColorRef BRTilePatternColor(CGImageRef img) {   // caller releases the result
+    if (!img) return NULL;
+    CGFloat w = (CGFloat)CGImageGetWidth(img), h = (CGFloat)CGImageGetHeight(img);
+    if (w < 1.0 || h < 1.0) return NULL;
+    static const CGPatternCallbacks cb = { 0, &BRTileDraw, &BRTileRelease };
+    CGImageRef held = CGImageRetain(img);                // freed by BRTileRelease when the pattern dies
+    CGPatternRef pat = CGPatternCreate((void *)held, CGRectMake(0, 0, w, h),
+                                       CGAffineTransformIdentity, w, h,
+                                       kCGPatternTilingConstantSpacing, true, &cb);
+    if (!pat) { CGImageRelease(held); return NULL; }
+    CGColorSpaceRef sp = CGColorSpaceCreatePattern(NULL);
+    CGFloat alpha = 1.0;
+    CGColorRef col = CGColorCreateWithPattern(sp, pat, &alpha);
+    CGColorSpaceRelease(sp);
+    CGPatternRelease(pat);                               // the colour retains it
+    return col;
+}
+
 // Apply (or restore) the opaque fill on one NSGlassEffectView-like view.
 static void BRGlassApplyToView(NSView *gv) {
     if (!gv) return;
@@ -36,19 +65,28 @@ static void BRGlassApplyToView(NSView *gv) {
         double cr = 0;
         @try { cr = [[gv valueForKey:@"cornerRadius"] doubleValue]; } @catch (__unused NSException *e) {}
 
-        __block CGColorRef cg = NULL;
-        NSColor *col = gGlassColorObj ?: [NSColor windowBackgroundColor];
-        if (@available(macOS 11.0, *))
-            [gv.effectiveAppearance performAsCurrentDrawingAppearance:^{ cg = col.CGColor; }];
-        else
-            cg = col.CGColor;
-
-        holder.layer.backgroundColor = cg;
+        CGImageRef img = gGlassImageEnabled ? BRImageForRole(@"glass") : NULL;
+        if (img) {
+            CGColorRef pat = BRTilePatternColor(img);    // tiles at the image's native size
+            holder.layer.contents        = nil;
+            holder.layer.backgroundColor = pat;          // layer retains it
+            if (pat) CGColorRelease(pat);
+        } else {
+            __block CGColorRef cg = NULL;
+            NSColor *col = gGlassColorObj ?: [NSColor windowBackgroundColor];
+            if (@available(macOS 11.0, *))
+                [gv.effectiveAppearance performAsCurrentDrawingAppearance:^{ cg = col.CGColor; }];
+            else
+                cg = col.CGColor;
+            holder.layer.contents = nil;
+            holder.layer.backgroundColor = cg;
+        }
         holder.layer.cornerRadius    = cr;
         holder.layer.masksToBounds   = (cr > 0.0);
         objc_setAssociatedObject(holder, kBRGlassPainted, @YES, OBJC_ASSOCIATION_RETAIN);
     } else if (objc_getAssociatedObject(holder, kBRGlassPainted)) {
         // feature turned off after we painted — restore the see-through glass
+        holder.layer.contents        = nil;
         holder.layer.backgroundColor = NULL;
         holder.layer.masksToBounds   = NO;
         objc_setAssociatedObject(holder, kBRGlassPainted, nil, OBJC_ASSOCIATION_RETAIN);

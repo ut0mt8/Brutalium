@@ -21,6 +21,8 @@
 - (BOOL)allowsVibrancy { return NO; }             // literal colour — don't blend with the vibrant titlebar
 @end
 
+
+
 static NSView *FindByClass(NSView *v, const char *exact) {
     for (NSView *s in v.subviews) { const char *n = class_getName([s class]); if (n && strcmp(n, exact) == 0) return s; }
     return nil;
@@ -100,5 +102,15 @@ void BRTitlebarApplyColor(NSWindow *w) {
         objc_setAssociatedObject(titlebar, kBar, bar, OBJC_ASSOCIATION_RETAIN);
     }
     bar.frame = strip;
-    bar.layer.backgroundColor = gTitlebarColorObj.CGColor;
+    CGImageRef tbimg = BRImageForRole(@"titlebar");
+    if (gTitlebarImageEnabled && tbimg) {
+        bar.layer.contents = (__bridge id)tbimg;
+        bar.layer.contentsGravity = kCAGravityResizeAspectFill;   // fill the strip, crop overflow
+        bar.layer.contentsScale = w.backingScaleFactor > 0.0 ? w.backingScaleFactor : 2.0;
+        bar.layer.masksToBounds = YES;
+        bar.layer.backgroundColor = gTitlebarColorObj.CGColor;     // shows through any transparency
+    } else {
+        bar.layer.contents = nil;
+        bar.layer.backgroundColor = gTitlebarColorObj.CGColor;
+    }
 }

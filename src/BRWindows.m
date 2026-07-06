@@ -54,14 +54,12 @@ static BOOL BRWindowIsMain(NSWindow *w) {
     return YES;
 }
 
-// Reserve space for the border instead of drawing over content. A CALayer border is
-// always drawn INWARD from the layer edge, so a thick border on the frame overlaps the
-// content view (which reaches the window edge). To keep content visible we inset the
-// titlebar container and the content view inward by the border width — the frame layer's
-// border then sits in the exposed margin. Re-applied on every window event so it tracks
-// live resizes; restores the natural layout (b = 0) when the border is off. Standard
-// NSThemeFrame windows only; apps that pin their content view with Auto Layout may
-// override the inset.
+// Reserve space for the border instead of drawing over content. A CALayer border is drawn
+// INWARD from the layer edge, so a thick border on the frame overlaps the content view. To keep
+// content visible we inset the titlebar container + content view inward by the border width; the
+// frame layer's border then sits in the exposed margin. Re-applied on every window event so it
+// tracks live resizes; restores the natural layout when the border is off. Standard NSThemeFrame
+// windows only; apps that pin content with Auto Layout may override the inset.
 static void BRLayoutForBorder(NSWindow *w) {
     NSView *frame = w.contentView.superview;
     if (!frame || ![frame isKindOfClass:NSClassFromString(@"NSThemeFrame")]) return;
@@ -76,9 +74,8 @@ static void BRLayoutForBorder(NSWindow *w) {
     CGFloat W = NSWidth(fb), H = NSHeight(fb);
     CGFloat b = BRBorderActive() ? gBorderSize : 0.0;
     if (b < 0.0) b = 0.0;
-    if (b * 2.0 >= W - 40.0 || b * 2.0 >= H - 40.0) b = 0.0;   // too big for this window — skip inset
-
-    CGFloat top = cont ? NSHeight(cont.frame) : 0.0;            // titlebar+toolbar band (height preserved across applies)
+    if (b * 2.0 >= W - 40.0 || b * 2.0 >= H - 40.0) b = 0.0;
+    CGFloat top = cont ? NSHeight(cont.frame) : 0.0;
     BOOL fullSize = (w.styleMask & NSWindowStyleMaskFullSizeContentView) != 0;
 
     @try {
@@ -93,11 +90,7 @@ static void BRLayoutForBorder(NSWindow *w) {
     } @catch (__unused NSException *e) {}
 }
 
-// Border drawn directly on the window frame's own layer. An earlier version used a
-// separate full-window sublayer, but a covering sublayer intercepts clicks in some
-// windows (Catalyst apps, sheets), so we use the frame's own layer border instead —
-// it never blocks events, follows the squared/rounded shape, and we re-apply the
-// active/inactive colour on every focus/activation change so it stays correct.
+// Border drawn on the window frame's own layer, re-coloured on focus changes.
 static void BRApplyBorder(NSWindow *w) {
     if (!(w.styleMask & NSWindowStyleMaskTitled)) return;
     NSView *frame = w.contentView.superview;
@@ -117,6 +110,7 @@ static void BRApplyBorder(NSWindow *w) {
         BRLayoutForBorder(w);          // inset content so the border doesn't cover it
     } @catch (__unused NSException *e) {}
 }
+
 
 void BRWindowsApply(NSWindow *w) {
     if (!w) return;

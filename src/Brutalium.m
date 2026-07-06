@@ -25,7 +25,7 @@ BOOL     gSquareToolbar = NO;
 double   gCornerRadius = 0.0;
 BOOL     gSelfExcluded = NO;
 
-BOOL     gLEnabled = YES;
+BOOL     gLEnabled = YES, gLightsImageEnabled = NO;
 double   gLRadius = 0.0, gLSize = 0.0;
 uint32_t gLCloseRGBA = 0xFF5F57FF, gLMinRGBA = 0xFEBC2EFF,
          gLZoomRGBA  = 0x28C840FF, gLGlyphRGBA = 0x0000008C;
@@ -42,12 +42,13 @@ BOOL     gTintIcons = NO;
 uint32_t gTintColorRGBA = 0x1E1E28FF, gTintChromeRGBA = 0x2C2C3CFF, gTintTextRGBA = 0xE6E6E6FF;
 NSColor *gTintColorObj = nil, *gTintChromeObj = nil, *gTintTextObj = nil;
 
-BOOL     gGlassFlatten = NO, gGlassColorAuto = YES;
+BOOL     gGlassFlatten = NO, gGlassColorAuto = YES, gGlassImageEnabled = NO;
 uint32_t gGlassColorRGBA = 0xFFFFFFFF;
 NSColor *gGlassColorObj = nil;
 BOOL     gGlassSelfExcluded = NO;
 
 BOOL     gTitlebarColorEnabled = NO;
+BOOL     gTitlebarImageEnabled = NO;
 uint32_t gTitlebarColorRGBA = 0x1E1E28FF;
 NSColor *gTitlebarColorObj = nil;
 BOOL     gTintSelfExcluded = NO;
@@ -92,24 +93,27 @@ static void BRRefreshConfig(void) {
     BRRecomputeSelfExclusion();
 
     uint64_t bf = 0; notify_get_state(gTokBorder, &bf);
-    bool bvalid = false, ben = false, bsh = true; double bsz = 1.0;
+    bool bvalid=false, ben=false, bsh=true; double bsz=1.0;
     BRUnpackBorder(bf, &bvalid, &ben, &bsh, &bsz);
     if (bvalid) { gBorderEnabled = ben; gBorderShadow = bsh; gBorderSize = bsz; }
     else        { gBorderEnabled = NO; gBorderShadow = YES; gBorderSize = 1.0; }
 
     uint64_t gf = 0; notify_get_state(gTokGlass, &gf);
-    bool gvalid = false, gfl = false, gauto = true; uint32_t grgba = 0xFFFFFFFF;
-    BRUnpackGlass(gf, &gvalid, &gfl, &gauto, &grgba);
-    if (gvalid) { gGlassFlatten = gfl; gGlassColorAuto = gauto; gGlassColorRGBA = grgba; }
-    else        { gGlassFlatten = NO; gGlassColorAuto = YES; gGlassColorRGBA = 0xFFFFFFFF; }
+    bool gvalid = false, gfl = false, gauto = true, gimg = false; uint32_t grgba = 0xFFFFFFFF;
+    BRUnpackGlass(gf, &gvalid, &gfl, &gauto, &gimg, &grgba);
+    if (gvalid) { gGlassFlatten = gfl; gGlassColorAuto = gauto; gGlassImageEnabled = gimg; gGlassColorRGBA = grgba; }
+    else        { gGlassFlatten = NO; gGlassColorAuto = YES; gGlassImageEnabled = NO; gGlassColorRGBA = 0xFFFFFFFF; }
     gGlassColorObj = gGlassColorAuto ? nil : BRMakeColor(gGlassColorRGBA);
 
     uint64_t tb = 0; notify_get_state(gTokTbar, &tb);
-    bool tbvalid = false, tben = false; uint32_t tbrgba = 0x1E1E28FF;
-    BRUnpackTbar(tb, &tbvalid, &tben, &tbrgba);
-    if (tbvalid) { gTitlebarColorEnabled = tben; gTitlebarColorRGBA = tbrgba; }
-    else         { gTitlebarColorEnabled = NO;  gTitlebarColorRGBA = 0x1E1E28FF; }
+    bool tbvalid = false, tben = false, tbimg = false; uint32_t tbrgba = 0x1E1E28FF;
+    BRUnpackTbar(tb, &tbvalid, &tben, &tbimg, &tbrgba);
+    if (tbvalid) { gTitlebarColorEnabled = tben; gTitlebarImageEnabled = tbimg; gTitlebarColorRGBA = tbrgba; }
+    else         { gTitlebarColorEnabled = NO;   gTitlebarImageEnabled = NO;    gTitlebarColorRGBA = 0x1E1E28FF; }
     gTitlebarColorObj = BRMakeColor(gTitlebarColorRGBA);
+
+    // Decode/refresh all feature images (titlebar, glass, …) from the shared global-domain registry.
+    BRImagesRefresh();
     uint64_t bc = 0; notify_get_state(gTokBColor, &bc);
     gBorderRGBA = bc ? (uint32_t)bc : 0x000000FF;
     gBorderColorObj = BRMakeColor(gBorderRGBA);
@@ -118,10 +122,10 @@ static void BRRefreshConfig(void) {
     gBorderInactiveObj = BRMakeColor(gBorderInactiveRGBA);
 
     uint64_t lf = 0; notify_get_state(gTokLFlags, &lf);
-    bool lvalid = false, len = false; double lrad = 0, lsz = 0;
-    BRUnpackLFlags(lf, &lvalid, &len, &lrad, &lsz);
+    bool lvalid = false, len = false, limg = false; double lrad = 0, lsz = 0;
+    BRUnpackLFlags(lf, &lvalid, &len, &limg, &lrad, &lsz);
     if (lvalid) {
-        gLEnabled = len; gLRadius = lrad; gLSize = lsz;
+        gLEnabled = len; gLightsImageEnabled = limg; gLRadius = lrad; gLSize = lsz;
         uint64_t v = 0;
         notify_get_state(gTokLClose, &v); gLCloseRGBA = (uint32_t)v;
         v = 0; notify_get_state(gTokLMin,  &v); gLMinRGBA  = (uint32_t)v;
@@ -131,7 +135,7 @@ static void BRRefreshConfig(void) {
         if (iv & BR_AUTO_STATE) gLInactiveAuto = YES;
         else { gLInactiveAuto = NO; gLInactiveRGBA = (uint32_t)iv; }
     } else {
-        gLEnabled = YES; gLRadius = 0.0; gLSize = 0.0;
+        gLEnabled = YES; gLightsImageEnabled = NO; gLRadius = 0.0; gLSize = 0.0;
         gLCloseRGBA = 0xFF5F57FF; gLMinRGBA = 0xFEBC2EFF; gLZoomRGBA = 0x28C840FF;
         gLGlyphRGBA = 0x0000008C; gLInactiveAuto = YES; gLInactiveRGBA = 0x9B9B9BFF;
     }

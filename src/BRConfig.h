@@ -29,6 +29,7 @@ extern BOOL     gLEnabled;
 extern double   gLRadius, gLSize;
 extern uint32_t gLCloseRGBA, gLMinRGBA, gLZoomRGBA, gLGlyphRGBA;
 extern BOOL     gLInactiveAuto;
+extern BOOL     gLightsImageEnabled;  // YES ⇒ paint buttons with light.* images
 extern uint32_t gLInactiveRGBA;
 
 // Tint module config
@@ -49,12 +50,14 @@ extern NSColor *gTintTextObj;         // precise text/label colour (cached, opaq
 // Glass module config (de-glass NSGlassEffectView)
 extern BOOL     gGlassFlatten;        // YES ⇒ flatten glass panels to an opaque fill
 extern BOOL     gGlassColorAuto;      // YES ⇒ use windowBackgroundColor; NO ⇒ gGlassColorObj
+extern BOOL     gGlassImageEnabled;   // YES ⇒ paint glass surfaces with the "glass" role image
 extern uint32_t gGlassColorRGBA;      // fixed fill colour (when !auto)
 extern NSColor *gGlassColorObj;       // cached fixed fill colour (nil ⇒ auto)
 extern BOOL     gGlassSelfExcluded;   // this app is on the glass exclusion list
 
 // Titlebar strip colour (custom-titlebar / window-manager feature)
 extern BOOL     gTitlebarColorEnabled;
+extern BOOL     gTitlebarImageEnabled;   // paint a background image instead of a flat colour
 extern uint32_t gTitlebarColorRGBA;
 extern NSColor *gTitlebarColorObj;    // cached fill colour for the titlebar strip
 
@@ -123,6 +126,10 @@ void BRGlassArm(void);                   // hook -[NSGlassEffectView layout]
 void BRGlassRefreshAll(void);            // re-apply/restore across live windows
 
 // Titlebar module (BRTitlebar.m)
-void BRTitlebarApplyColor(NSWindow *w);  // colour the titlebar strip (or restore) for one window
+void BRTitlebarApplyColor(NSWindow *w);   // colour/image the titlebar strip (or restore) for one window
+
+// Image registry (BRImages.m) — shared decoded images by role
+void       BRImagesRefresh(void);         // reconcile the cache from the global-domain registry
+CGImageRef BRImageForRole(NSString *role);// cached CGImage for a role, or NULL
 
 #endif /* BRCONFIG_H */

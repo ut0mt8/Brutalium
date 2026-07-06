@@ -82,51 +82,58 @@ static inline void BRUnpackBorder(uint64_t v, bool *valid, bool *enabled, bool *
 }
 
 // De-glass: bit63 valid · bit0 flatten · bit1 colorAuto · bits 16..47 fill RGBA
-static inline uint64_t BRPackGlass(BOOL flatten, BOOL colorAuto, uint32_t rgba) {
+static inline uint64_t BRPackGlass(BOOL flatten, BOOL colorAuto, BOOL image, uint32_t rgba) {
     uint64_t v = (1ULL << 63);
     if (flatten)   v |= 1ULL;
     if (colorAuto) v |= 2ULL;
+    if (image)     v |= 4ULL;               // paint glass with the "glass" role image
     v |= ((uint64_t)rgba) << 16;
     return v;
 }
-static inline void BRUnpackGlass(uint64_t v, bool *valid, bool *flatten, bool *colorAuto, uint32_t *rgba) {
+static inline void BRUnpackGlass(uint64_t v, bool *valid, bool *flatten, bool *colorAuto, bool *image, uint32_t *rgba) {
     *valid     = (v >> 63) & 1ULL;
     *flatten   = v & 1ULL;
     *colorAuto = (v >> 1) & 1ULL;
+    *image     = (v >> 2) & 1ULL;
     *rgba      = (uint32_t)((v >> 16) & 0xFFFFFFFFULL);
 }
 
 // Titlebar strip colour: bit63 valid · bit0 enabled · bits 16..47 RGBA
-static inline uint64_t BRPackTbar(BOOL enabled, uint32_t rgba) {
+// Titlebar strip: bit63 valid · bit0 enabled · bit1 image-mode · bits 16..47 RGBA
+static inline uint64_t BRPackTbar(BOOL enabled, BOOL image, uint32_t rgba) {
     uint64_t v = (1ULL << 63);
     if (enabled) v |= 1ULL;
+    if (image)   v |= (1ULL << 1);
     v |= ((uint64_t)rgba) << 16;
     return v;
 }
-static inline void BRUnpackTbar(uint64_t v, bool *valid, bool *enabled, uint32_t *rgba) {
+static inline void BRUnpackTbar(uint64_t v, bool *valid, bool *enabled, bool *image, uint32_t *rgba) {
     *valid   = (v >> 63) & 1ULL;
     *enabled = v & 1ULL;
+    *image   = (v >> 1) & 1ULL;
     *rgba    = (uint32_t)((v >> 16) & 0xFFFFFFFFULL);
 }
 
 #pragma mark - Lights flags
 
 // bit63 valid · bit0 enabled · bits 1..16 radius q8 · bits 17..32 size signed q8
-static inline uint64_t BRPackLFlags(BOOL enabled, double radius, double size) {
+static inline uint64_t BRPackLFlags(BOOL enabled, BOOL image, double radius, double size) {
     uint64_t v = (1ULL << 63);
     if (enabled) v |= 1ULL;
     uint16_t rq = (uint16_t)lround(fmax(0.0, radius) * 256.0);
     int16_t  sq = (int16_t)lround(size * 256.0);
     v |= ((uint64_t)rq) << 1;
     v |= ((uint64_t)(uint16_t)sq) << 17;
+    if (image) v |= (1ULL << 33);            // paint buttons with light.<close|min|zoom> images
     return v;
 }
-static inline void BRUnpackLFlags(uint64_t v, bool *valid, bool *enabled,
+static inline void BRUnpackLFlags(uint64_t v, bool *valid, bool *enabled, bool *image,
                                   double *radius, double *size) {
     *valid = (v >> 63) & 1ULL; *enabled = v & 1ULL;
     uint16_t rq = (uint16_t)((v >> 1) & 0xFFFF);
     int16_t  sq = (int16_t)((v >> 17) & 0xFFFF);
     *radius = rq / 256.0; *size = sq / 256.0;
+    *image = (v >> 33) & 1ULL;
 }
 
 #pragma mark - Tint flags
@@ -227,6 +234,7 @@ static inline void BRPublishFromDefaults(NSUserDefaults *d) {
     double cradius = [d floatForKey:@"corners.radius"];
 
     BOOL lenabled = [d objectForKey:@"lights.enabled"] ? [d boolForKey:@"lights.enabled"] : YES;
+    BOOL limage   = [d boolForKey:@"lights.image.enabled"];
     double lradius = [d floatForKey:@"lights.radius"];
     double lsize   = [d floatForKey:@"lights.size"];
 
@@ -243,7 +251,7 @@ static inline void BRPublishFromDefaults(NSUserDefaults *d) {
     else                                                             inact = BR_AUTO_STATE;
 
     BRSetState(BR_ST_WIN,    BRPackWin(master, corners, toolbar, squareLayers, squareToolbar, cradius));
-    BRSetState(BR_ST_LFLAGS, BRPackLFlags(lenabled, lradius, lsize));
+    BRSetState(BR_ST_LFLAGS, BRPackLFlags(lenabled, limage, lradius, lsize));
     BRSetState(BR_ST_LCLOSE, close);
     BRSetState(BR_ST_LMIN,   mn);
     BRSetState(BR_ST_LZOOM,  zoom);
@@ -302,17 +310,29 @@ static inline void BRPublishFromDefaults(NSUserDefaults *d) {
     BRSetState(BR_ST_BCOLORI, bColorI);
 
     BOOL gFlatten = [d objectForKey:@"glass.flatten"] ? [d boolForKey:@"glass.flatten"] : NO;
+    BOOL gImage = [d boolForKey:@"glass.image.enabled"];
     NSString *gcol = [d stringForKey:@"glass.color"] ?: @"auto";
     BOOL gAuto = ([gcol caseInsensitiveCompare:@"auto"] == NSOrderedSame);
     uint32_t gRGBA = 0xFFFFFFFF;                       // only used when !auto
     if (!gAuto) { uint32_t v; if (BRHexToRGBA(gcol, &v)) gRGBA = v; else gAuto = YES; }
-    BRSetState(BR_ST_GLASS, BRPackGlass(gFlatten, gAuto, gRGBA));
+    BRSetState(BR_ST_GLASS, BRPackGlass(gFlatten, gAuto, gImage, gRGBA));
 
     BOOL tbEnabled = [d boolForKey:@"titlebar.color.enabled"];
+    BOOL tbImage   = [d boolForKey:@"titlebar.image.enabled"];
     NSString *tbcol = [d stringForKey:@"titlebar.color"] ?: @"#1E1E28";
     uint32_t tbRGBA = 0x1E1E28FF;
     { uint32_t v; if (BRHexToRGBA(tbcol, &v)) tbRGBA = v; }
-    BRSetState(BR_ST_TBAR, BRPackTbar(tbEnabled, tbRGBA));
+    BRSetState(BR_ST_TBAR, BRPackTbar(tbEnabled, tbImage, tbRGBA));
+
+    // Images (base64 PNGs, downscaled by the CLI) are too big for notify words, so the whole
+    // { role : base64 } registry rides one global-domain key — the same launch-readable channel
+    // the lists use, so sandboxed apps can read it. Per-feature enable flags ride notify words.
+    NSDictionary *imgs = [d dictionaryForKey:@"images"] ?: @{};
+    CFPreferencesSetValue(CFSTR("com.tweak.brutalium.images"),
+                          (imgs.count ? (__bridge CFPropertyListRef)imgs : NULL),
+                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    CFPreferencesSynchronize(kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+
     notify_post(BR_NOTIFY_CHANGED);
 }
 

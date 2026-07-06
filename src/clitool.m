@@ -3,9 +3,47 @@
 //
 
 #import <Foundation/Foundation.h>
+#import <ImageIO/ImageIO.h>
+#import <CoreGraphics/CoreGraphics.h>
 #import "BRState.h"
 #import "BRThemes.h"
 #import "BRTintThemes.h"
+
+// Load an image file, downscale so its longest side is <= maxPx, re-encode as PNG, and
+// return base64. Runs in the CLI (unsandboxed), so arbitrary paths are readable here; the
+// small result travels to injected apps via the global-domain key. Returns nil on failure.
+static NSString *BRImageFileToBase64PNG(NSString *path, int maxPx) {
+    NSURL *url = [NSURL fileURLWithPath:path];
+    CGImageSourceRef src = CGImageSourceCreateWithURL((__bridge CFURLRef)url, NULL);
+    if (!src) return nil;
+    NSDictionary *opt = @{ (id)kCGImageSourceCreateThumbnailFromImageAlways: @YES,
+                           (id)kCGImageSourceCreateThumbnailWithTransform:   @YES,
+                           (id)kCGImageSourceThumbnailMaxPixelSize:          @(maxPx) };
+    CGImageRef thumb = CGImageSourceCreateThumbnailAtIndex(src, 0, (__bridge CFDictionaryRef)opt);
+    CFRelease(src);
+    if (!thumb) return nil;
+
+    NSMutableData *png = [NSMutableData data];
+    CGImageDestinationRef dst = CGImageDestinationCreateWithData((__bridge CFMutableDataRef)png,
+                                                                 CFSTR("public.png"), 1, NULL);
+    if (!dst) { CGImageRelease(thumb); return nil; }
+    CGImageDestinationAddImage(dst, thumb, NULL);
+    bool ok = CGImageDestinationFinalize(dst);
+    CFRelease(dst);
+    CGImageRelease(thumb);
+    if (!ok || png.length == 0) return nil;
+    return [png base64EncodedStringWithOptions:0];
+}
+
+// Store (or clear) an image role in the shared `images` registry dict + remember its path.
+static void BRSetImageRole(NSUserDefaults *d, NSString *role, NSString *b64OrNil, NSString *pathOrNil) {
+    NSMutableDictionary *imgs  = [[d dictionaryForKey:@"images"]      mutableCopy] ?: [NSMutableDictionary dictionary];
+    NSMutableDictionary *paths = [[d dictionaryForKey:@"images.paths"] mutableCopy] ?: [NSMutableDictionary dictionary];
+    if (b64OrNil.length) { imgs[role] = b64OrNil; paths[role] = pathOrNil ?: @"(set)"; }
+    else                 { [imgs removeObjectForKey:role]; [paths removeObjectForKey:role]; }
+    [d setObject:imgs  forKey:@"images"];
+    [d setObject:paths forKey:@"images.paths"];
+}
 
 static void usage(void) {
     fprintf(stderr,
@@ -29,6 +67,7 @@ static void usage(void) {
         "  titlebar show <bundleid>       Stop removing it\n"
         "  titlebar list\n"
         "  titlebar color <#RRGGBB|off>   Colour the titlebar strip (leaves the toolbar alone)\n"
+        "  titlebar image <path|off>      Use an image as the titlebar-strip background\n"
         "\n"
         "  border on | off                Draw a border on every window\n"
         "  border size <points>           Border width\n"
@@ -40,6 +79,7 @@ static void usage(void) {
         "  lights radius <value>          Traffic-light corner radius\n"
         "  lights size <delta>            Adjust square size in points\n"
         "  lights color <slot> <value>    slot = close|min|zoom|inactive|glyph\n"
+        "  lights image <close|min|zoom> <path|off>   Use an image per button (off = disable image mode)\n"
         "                                 value = #RRGGBB / #RRGGBBAA (inactive: auto)\n"
         "  lights theme <name> | list     Apply a colour preset\n"
         "\n"
@@ -58,6 +98,7 @@ static void usage(void) {
         "\n"
         "  glass off|on                   Flatten Liquid Glass to an opaque panel (off = flatten)\n"
         "  glass color <#RRGGBB|auto>     Fill colour (auto = window background)\n"
+        "  glass image <path|off>         Paint glass surfaces with an image (tileable texture reads best)\n"
         "  glass exclude add <bundleid>   Leave this app's glass alone\n"
         "  glass exclude remove <bundleid>\n"
         "  glass exclude list\n"
@@ -123,6 +164,7 @@ int main(int argc, const char *argv[]) {
             [d setObject:@[]     forKey:@"glass.exclude"];
             [d setBool:NO       forKey:@"titlebar.color.enabled"];
             [d setObject:@"#1E1E28" forKey:@"titlebar.color"];
+            [d setBool:NO       forKey:@"titlebar.image.enabled"];
         }
 
         BOOL changed = YES;
@@ -169,6 +211,18 @@ int main(int argc, const char *argv[]) {
                     [d setBool:YES forKey:@"titlebar.color.enabled"];
                     [d setObject:val forKey:@"titlebar.color"];
                 }
+            } else if (strcmp(argv[2], "image") == 0 && argc >= 4) {
+                if (strcmp(argv[3], "off") == 0) {
+                    [d setBool:NO forKey:@"titlebar.image.enabled"];
+                    BRSetImageRole(d, @"titlebar", nil, nil);
+                } else {
+                    NSString *path = [[NSString stringWithUTF8String:argv[3]] stringByExpandingTildeInPath];
+                    NSString *b64 = BRImageFileToBase64PNG(path, 600);   // downscale + encode
+                    if (!b64) { fprintf(stderr, "error: could not read/decode image at %s\n", path.UTF8String); return 1; }
+                    BRSetImageRole(d, @"titlebar", b64, path);
+                    [d setBool:YES forKey:@"titlebar.image.enabled"];
+                    [d setBool:YES forKey:@"titlebar.color.enabled"];    // ensure the bar is inserted
+                }
             } else {
                 NSMutableArray *list = [[d arrayForKey:@"titlebar.hide"] mutableCopy] ?: [NSMutableArray array];
                 if (strcmp(argv[2], "list") == 0) {
@@ -214,6 +268,26 @@ int main(int argc, const char *argv[]) {
                 [d setBool:(strcmp(sub, "on") == 0) forKey:@"lights.enabled"];
             }
             else if (strcmp(sub, "radius") == 0 && argc >= 4) [d setFloat:(float)atof(argv[3]) forKey:@"lights.radius"];
+            else if (strcmp(sub, "image") == 0 && argc >= 4) {
+                if (strcmp(argv[3], "off") == 0) {
+                    [d setBool:NO forKey:@"lights.image.enabled"];   // keep the images, just stop using them
+                } else if (argc >= 5) {
+                    NSString *btn = [NSString stringWithUTF8String:argv[3]];
+                    NSString *role = [btn isEqualToString:@"close"] ? @"light.close"
+                                   : [btn isEqualToString:@"min"]   ? @"light.min"
+                                   : [btn isEqualToString:@"zoom"]  ? @"light.zoom" : nil;
+                    if (!role) { fprintf(stderr, "error: button must be close, min, or zoom\n"); return 1; }
+                    if (strcmp(argv[4], "off") == 0) {
+                        BRSetImageRole(d, role, nil, nil);
+                    } else {
+                        NSString *path = [[NSString stringWithUTF8String:argv[4]] stringByExpandingTildeInPath];
+                        NSString *b64 = BRImageFileToBase64PNG(path, 64);   // buttons are tiny; 64px is plenty
+                        if (!b64) { fprintf(stderr, "error: could not read/decode image at %s\n", path.UTF8String); return 1; }
+                        BRSetImageRole(d, role, b64, path);
+                        [d setBool:YES forKey:@"lights.image.enabled"];
+                    }
+                } else { fprintf(stderr, "usage: lights image <close|min|zoom> <path|off>  |  lights image off\n"); return 1; }
+            }
             else if (strcmp(sub, "size")   == 0 && argc >= 4) [d setFloat:(float)atof(argv[3]) forKey:@"lights.size"];
             else if (strcmp(sub, "color")  == 0 && argc >= 5) {
                 NSString *key = keyForSlot(argv[3]);
@@ -333,6 +407,19 @@ int main(int argc, const char *argv[]) {
                     [d setObject:val forKey:@"glass.color"];
                 }
             }
+            else if (strcmp(sub, "image") == 0 && argc >= 4) {
+                if (strcmp(argv[3], "off") == 0) {
+                    [d setBool:NO forKey:@"glass.image.enabled"];
+                    BRSetImageRole(d, @"glass", nil, nil);
+                } else {
+                    NSString *path = [[NSString stringWithUTF8String:argv[3]] stringByExpandingTildeInPath];
+                    NSString *b64 = BRImageFileToBase64PNG(path, 600);
+                    if (!b64) { fprintf(stderr, "error: could not read/decode image at %s\n", path.UTF8String); return 1; }
+                    BRSetImageRole(d, @"glass", b64, path);
+                    [d setBool:YES forKey:@"glass.image.enabled"];
+                    [d setBool:YES forKey:@"glass.flatten"];   // painting requires the glass to be flattened
+                }
+            }
             else if (strcmp(sub, "exclude") == 0) {
                 NSMutableArray *list = [[d arrayForKey:@"glass.exclude"] mutableCopy] ?: [NSMutableArray array];
                 if (argc >= 4 && strcmp(argv[3], "list") == 0) {
@@ -367,6 +454,9 @@ int main(int argc, const char *argv[]) {
             printf("  titlebar color : %s\n",
                    [d boolForKey:@"titlebar.color.enabled"]
                      ? [([d stringForKey:@"titlebar.color"] ?: @"#1E1E28") UTF8String] : "off");
+            printf("  titlebar image : %s\n",
+                   [d boolForKey:@"titlebar.image.enabled"]
+                     ? [(([d dictionaryForKey:@"images.paths"][@"titlebar"]) ?: @"(set)") UTF8String] : "off");
             printf("  border         : %s  (size %.1f, color %s, inactive %s, shadow %s)\n",
                    [d boolForKey:@"border.enabled"] ? "on" : "off",
                    [d floatForKey:@"border.size"],
@@ -377,6 +467,13 @@ int main(int argc, const char *argv[]) {
                    [d boolForKey:@"lights.enabled"] ? "on" : "off",
                    [d floatForKey:@"lights.radius"], [d floatForKey:@"lights.size"],
                    [([d stringForKey:@"lights.theme"] ?: @"custom") UTF8String]);
+            if ([d boolForKey:@"lights.image.enabled"]) {
+                NSDictionary *ip = [d dictionaryForKey:@"images.paths"] ?: @{};
+                printf("    images on: close=%s min=%s zoom=%s\n",
+                       [((ip[@"light.close"]) ?: @"-") UTF8String],
+                       [((ip[@"light.min"])   ?: @"-") UTF8String],
+                       [((ip[@"light.zoom"])  ?: @"-") UTF8String]);
+            }
             printf("    close=%s min=%s zoom=%s inactive=%s glyph=%s\n",
                    [([d stringForKey:@"lights.colorClose"] ?: @"-") UTF8String],
                    [([d stringForKey:@"lights.colorMin"] ?: @"-") UTF8String],
@@ -396,9 +493,11 @@ int main(int argc, const char *argv[]) {
                    [d boolForKey:@"tint.wallpaper"] ? "on" : "off");
             printf("    excluded apps: %lu\n",
                    (unsigned long)([d arrayForKey:@"tint.exclude"] ?: @[]).count);
-            printf("  glass          : %s  (fill %s, excl %lu)\n",
+            printf("  glass          : %s  (fill %s, image %s, excl %lu)\n",
                    [d boolForKey:@"glass.flatten"] ? "off — flattened" : "on (default)",
                    [([d stringForKey:@"glass.color"] ?: @"auto") UTF8String],
+                   [d boolForKey:@"glass.image.enabled"]
+                     ? [(([d dictionaryForKey:@"images.paths"][@"glass"]) ?: @"(set)") UTF8String] : "off",
                    (unsigned long)([d arrayForKey:@"glass.exclude"] ?: @[]).count);
         }
         else if (strcmp(cmd, "publish") == 0) { changed = NO; BRPublishFromDefaults(d); printf("Published.\n"); }
