@@ -20,6 +20,7 @@ CLI_NAME    = brutalium
 BUILD_DIR   = build
 SRC_DIR     = src
 APP_DIR     = app
+#INSTALL_DIR = /opt/pluginplayground/tweaks
 INSTALL_DIR = /var/ammonia/core/tweaks
 CLI_DIR     = /usr/local/bin
 AGENT_DIR   = /Library/LaunchAgents

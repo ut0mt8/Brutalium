@@ -54,17 +54,35 @@ static BOOL BRWindowIsMain(NSWindow *w) {
     return YES;
 }
 
+// Frame-based insetting is only safe on autoresizing content. On Auto-Layout / SwiftUI-hosted
+// content (NSHostingView), setting the frame triggers a re-entrant constraint update inside the
+// window's layout pass — which macOS 27 rejects by throwing in _postWindowNeedsUpdateConstraints,
+// aborting the app (observed crashing System Settings). Detect that and skip: the border still
+// draws on the frame layer, it just doesn't reserve space (draws over the content edge instead).
+static BOOL BRContentIsConstraintDriven(NSView *content) {
+    if (!content) return YES;                                   // unknown → be safe
+    if (!content.translatesAutoresizingMaskIntoConstraints) return YES;
+    const char *cn = class_getName(object_getClass(content));
+    if (strstr(cn, "HostingView") || strstr(cn, "HostingController")) return YES;
+    for (NSView *sv in content.subviews) {
+        const char *sn = class_getName(object_getClass(sv));
+        if (strstr(sn, "HostingView") || strstr(sn, "ConstraintBasedLayoutHostingView")) return YES;
+    }
+    return NO;
+}
+
 // Reserve space for the border instead of drawing over content. A CALayer border is drawn
 // INWARD from the layer edge, so a thick border on the frame overlaps the content view. To keep
 // content visible we inset the titlebar container + content view inward by the border width; the
 // frame layer's border then sits in the exposed margin. Re-applied on every window event so it
 // tracks live resizes; restores the natural layout when the border is off. Standard NSThemeFrame
-// windows only; apps that pin content with Auto Layout may override the inset.
+// windows only; Auto-Layout / SwiftUI-hosted windows are skipped (see above).
 static void BRLayoutForBorder(NSWindow *w) {
     NSView *frame = w.contentView.superview;
     if (!frame || ![frame isKindOfClass:NSClassFromString(@"NSThemeFrame")]) return;
     NSView *content = w.contentView;
     if (!content) return;
+    if (BRContentIsConstraintDriven(content)) return;           // never frame-inset SwiftUI content
 
     NSView *cont = nil;
     for (NSView *sv in frame.subviews)
