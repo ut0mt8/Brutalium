@@ -23,6 +23,7 @@ BOOL     gMaster = YES, gCorners = YES, gToolbar = YES;
 BOOL     gSquareLayers = NO;
 BOOL     gSquareToolbar = NO;
 double   gCornerRadius = 0.0;
+double   gLayerRadius = 0.0;   // radius applied by 'corners layers' (0 == square)
 BOOL     gSelfExcluded = NO;
 
 BOOL     gLEnabled = YES, gLightsImageEnabled = NO;
@@ -85,10 +86,10 @@ static void BRRecomputeSelfExclusion(void) {
 
 static void BRRefreshConfig(void) {
     uint64_t w = 0; notify_get_state(gTokWin, &w);
-    bool valid = false, m = false, c = false, t = false, sl = false, st = false; double rad = 0;
-    BRUnpackWin(w, &valid, &m, &c, &t, &sl, &st, &rad);
-    if (valid) { gMaster = m; gCorners = c; gToolbar = t; gSquareLayers = sl; gSquareToolbar = st; gCornerRadius = rad; }
-    else       { gMaster = YES; gCorners = YES; gToolbar = YES; gSquareLayers = NO; gSquareToolbar = NO; gCornerRadius = 0.0; }
+    bool valid = false, m = false, c = false, t = false, sl = false, st = false; double rad = 0, lyrad = 0;
+    BRUnpackWin(w, &valid, &m, &c, &t, &sl, &st, &rad, &lyrad);
+    if (valid) { gMaster = m; gCorners = c; gToolbar = t; gSquareLayers = sl; gSquareToolbar = st; gCornerRadius = rad; gLayerRadius = lyrad; }
+    else       { gMaster = YES; gCorners = YES; gToolbar = YES; gSquareLayers = NO; gSquareToolbar = NO; gCornerRadius = 0.0; gLayerRadius = 0.0; }
 
     BRRecomputeSelfExclusion();
 

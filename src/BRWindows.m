@@ -268,23 +268,24 @@ ZKSwizzleInterfaceGroup(BRW_TitlebarDecorationView, _NSTitlebarDecorationView, N
 }
 @end
 
-// Square EVERY CALayer's corners app-wide (aggressive — buttons, fields, popovers,
-// menus, etc.). Off by default; gated by BRSquareLayersActive(). Forces an
-// imperceptible radius (1e-7, like apple-sharpener) and ignores any radius an app
-// tries to set, so rounded rects stay flat. When the option is off, both methods
-// behave exactly like the originals.
+// Square (or round) EVERY CALayer's corners app-wide (aggressive — buttons, fields, popovers,
+// menus, etc.). Off by default; gated by BRSquareLayersActive(). Forces each layer to
+// `corners.layers.radius` (default 0 → an imperceptible 1e-7 that reads as square while defeating
+// apps that re-round), overriding any radius an app tries to set. When off, both methods behave
+// exactly like the originals.
 ZKSwizzleInterfaceGroup(BRW_CALayer, CALayer, CALayer, BRUTALIUM_WINDOWS)
 @implementation BRW_CALayer
 - (void)layoutSublayers {
     ZKOrig(void);
     if (BRSquareLayersActive()) {
-        ((CALayer *)self).cornerRadius = 1e-7;
+        CGFloat lr = BRLayerRadiusEffective();
+        ((CALayer *)self).cornerRadius = lr;
         CALayer *m = ((CALayer *)self).mask;
-        if (m) m.cornerRadius = 1e-7;
+        if (m) m.cornerRadius = lr;
     }
 }
 - (void)setCornerRadius:(CGFloat)radius {
-    ZKOrig(void, BRSquareLayersActive() ? (CGFloat)1e-7 : radius);
+    ZKOrig(void, BRSquareLayersActive() ? BRLayerRadiusEffective() : radius);
 }
 @end
 

@@ -44,8 +44,9 @@ enum { BR_MODE_AUTO = 0, BR_MODE_LIGHT = 1, BR_MODE_DARK = 2, BR_MODE_NONE = 3 }
 
 #pragma mark - Window flags
 
-// bit63 valid · bit0 master · bit1 corners · bit2 toolbar · bits 8..23 radius q8
-static inline uint64_t BRPackWin(BOOL master, BOOL corners, BOOL toolbar, BOOL squareLayers, BOOL squareToolbar, double radius) {
+// bit63 valid · bit0 master · bit1 corners · bit2 toolbar · bit3 squareLayers · bit4 squareToolbar
+// bits 8..23 radius q8 · bits 24..39 layerRadius q8 (radius applied by 'corners layers'; 0 == square)
+static inline uint64_t BRPackWin(BOOL master, BOOL corners, BOOL toolbar, BOOL squareLayers, BOOL squareToolbar, double radius, double layerRadius) {
     uint64_t v = (1ULL << 63);
     if (master)  v |= 1ULL;
     if (corners) v |= 2ULL;
@@ -54,15 +55,19 @@ static inline uint64_t BRPackWin(BOOL master, BOOL corners, BOOL toolbar, BOOL s
     if (squareToolbar) v |= 16ULL;
     uint16_t rq = (uint16_t)lround(fmax(0.0, radius) * 256.0);
     v |= ((uint64_t)rq) << 8;
+    uint16_t lrq = (uint16_t)lround(fmax(0.0, layerRadius) * 256.0);
+    v |= ((uint64_t)lrq) << 24;
     return v;
 }
 static inline void BRUnpackWin(uint64_t v, bool *valid, bool *master, bool *corners,
-                               bool *toolbar, bool *squareLayers, bool *squareToolbar, double *radius) {
+                               bool *toolbar, bool *squareLayers, bool *squareToolbar,
+                               double *radius, double *layerRadius) {
     *valid = (v >> 63) & 1ULL; *master = v & 1ULL;
     *corners = (v >> 1) & 1ULL; *toolbar = (v >> 2) & 1ULL;
     *squareLayers  = (v >> 3) & 1ULL;
     *squareToolbar = (v >> 4) & 1ULL;
-    *radius = (double)((v >> 8) & 0xFFFF) / 256.0;
+    *radius      = (double)((v >> 8)  & 0xFFFF) / 256.0;
+    *layerRadius = (double)((v >> 24) & 0xFFFF) / 256.0;
 }
 
 // Window border: bit63 valid · bit0 enabled · bit1 shadow · bits 8..15 size (whole points)
@@ -232,6 +237,7 @@ static inline void BRPublishFromDefaults(NSUserDefaults *d) {
     BOOL squareLayers = [d objectForKey:@"corners.layers"] ? [d boolForKey:@"corners.layers"] : NO;
     BOOL squareToolbar = [d objectForKey:@"corners.toolbar"] ? [d boolForKey:@"corners.toolbar"] : NO;
     double cradius = [d floatForKey:@"corners.radius"];
+    double lyradius = [d floatForKey:@"corners.layers.radius"];
 
     BOOL lenabled = [d objectForKey:@"lights.enabled"] ? [d boolForKey:@"lights.enabled"] : YES;
     BOOL limage   = [d boolForKey:@"lights.image.enabled"];
@@ -250,7 +256,7 @@ static inline void BRPublishFromDefaults(NSUserDefaults *d) {
     else if (BRHexToRGBA(ia, &iv))                                   inact = iv;
     else                                                             inact = BR_AUTO_STATE;
 
-    BRSetState(BR_ST_WIN,    BRPackWin(master, corners, toolbar, squareLayers, squareToolbar, cradius));
+    BRSetState(BR_ST_WIN,    BRPackWin(master, corners, toolbar, squareLayers, squareToolbar, cradius, lyradius));
     BRSetState(BR_ST_LFLAGS, BRPackLFlags(lenabled, limage, lradius, lsize));
     BRSetState(BR_ST_LCLOSE, close);
     BRSetState(BR_ST_LMIN,   mn);

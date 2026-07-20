@@ -56,6 +56,7 @@ static void usage(void) {
         "  corners on | off               Square window corners\n"
         "  corners radius <value>         0 = fully square\n"
         "  corners layers on | off        Square EVERY layer's corners (aggressive)\n"
+        "  corners layers radius <value>  Radius 'corners layers' applies (0 = square, default)\n"
         "  corners toolbar on | off       Square only toolbar-item corners (scoped)\n"
         "\n"
         "  toolbar on | off               Force expanded toolbar\n"
@@ -132,6 +133,7 @@ int main(int argc, const char *argv[]) {
             [d setBool:YES forKey:@"corners.enabled"];
             [d setFloat:0.0f forKey:@"corners.radius"];
             [d setBool:NO forKey:@"corners.layers"];
+            [d setFloat:0.0f forKey:@"corners.layers.radius"];
             [d setBool:NO forKey:@"corners.toolbar"];
             [d setBool:YES forKey:@"toolbar.enabled"];
             [d setObject:@[] forKey:@"toolbar.exclude"];
@@ -175,7 +177,12 @@ int main(int argc, const char *argv[]) {
 
         else if (strcmp(cmd, "corners") == 0 && argc >= 3) {
             if (strcmp(argv[2], "radius") == 0 && argc >= 4) [d setFloat:(float)atof(argv[3]) forKey:@"corners.radius"];
-            else if (strcmp(argv[2], "layers") == 0 && argc >= 4) [d setBool:(strcmp(argv[3], "on") == 0) forKey:@"corners.layers"];
+            else if (strcmp(argv[2], "layers") == 0 && argc >= 4) {
+                if (strcmp(argv[3], "radius") == 0 && argc >= 5)
+                    [d setFloat:(float)atof(argv[4]) forKey:@"corners.layers.radius"];
+                else
+                    [d setBool:(strcmp(argv[3], "on") == 0) forKey:@"corners.layers"];
+            }
             else if (strcmp(argv[2], "toolbar") == 0 && argc >= 4) [d setBool:(strcmp(argv[3], "on") == 0) forKey:@"corners.toolbar"];
             else [d setBool:(strcmp(argv[2], "on") == 0) forKey:@"corners.enabled"];
         }
@@ -445,7 +452,13 @@ int main(int argc, const char *argv[]) {
             printf("  master         : %s\n", [d boolForKey:@"enabled"] ? "on" : "off");
             printf("  corners        : %s  (radius %.1f%s)\n", [d boolForKey:@"corners.enabled"] ? "on" : "off",
                    [d floatForKey:@"corners.radius"], [d floatForKey:@"corners.radius"] == 0 ? " square" : "");
-            printf("  corners layers : %s\n", [d boolForKey:@"corners.layers"] ? "on (square everything)" : "off");
+            printf("  corners layers : %s%s",
+                   [d boolForKey:@"corners.layers"] ? "on" : "off",
+                   [d boolForKey:@"corners.layers"] ? "" : "\n");
+            if ([d boolForKey:@"corners.layers"]) {
+                float lr = [d floatForKey:@"corners.layers.radius"];
+                printf("  (radius %.1f%s)\n", lr, lr == 0 ? " square" : "");
+            }
             printf("  corners toolbar: %s\n", [d boolForKey:@"corners.toolbar"] ? "on" : "off");
             printf("  toolbar        : %s\n", [d boolForKey:@"toolbar.enabled"] ? "on" : "off");
             printf("  toolbar excl.  : %s\n", ex.count ? [[ex componentsJoinedByString:@", "] UTF8String] : "(none)");

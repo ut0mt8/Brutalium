@@ -15,6 +15,7 @@ extern BOOL     gSquareLayers;  // square EVERY CALayer's corners (app-wide, agg
 extern BOOL     gSquareToolbar; // square only toolbar-item corners (scoped)
 extern BOOL     gToolbar;       // force expanded toolbar
 extern double   gCornerRadius;  // 0 == fully square
+extern double   gLayerRadius;   // radius 'corners layers' applies to each CALayer (0 == square)
 extern BOOL     gSelfExcluded;  // this app is on the toolbar exclusion list
 extern BOOL     gTintSelfExcluded;      // this app is on the tint exclusion list
 extern BOOL     gSelfNoTitlebar;        // remove this app's titlebar entirely
@@ -65,6 +66,13 @@ extern NSColor *gTitlebarColorObj;    // cached fill colour for the titlebar str
 static inline BOOL BRCornersActive(void) { return gMaster && gCorners; }
 static inline BOOL BRSquareLayersActive(void) { return gMaster && gSquareLayers; }
 static inline BOOL BRSquareToolbarActive(void) { return gMaster && gSquareToolbar; }
+
+// The value the 'corners layers' feature forces onto each CALayer. 0 keeps the historical
+// imperceptible-but-nonzero radius (1e-7) that reads as square while defeating apps re-rounding;
+// any configured value > 0 rounds every layer to that radius instead.
+static inline CGFloat BRLayerRadiusEffective(void) {
+    return (gLayerRadius > 0.0) ? (CGFloat)gLayerRadius : (CGFloat)1e-7;
+}
 static inline BOOL BRToolbarActive(void) { return gMaster && gToolbar && !gSelfExcluded; }
 static inline BOOL BRLightsActive(void)  { return gMaster && gLEnabled; }
 static inline BOOL BRNoTitlebarActive(void) { return gMaster && gSelfNoTitlebar; }
