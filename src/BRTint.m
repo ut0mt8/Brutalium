@@ -306,11 +306,9 @@ void BRTintApply(NSWindow *w) {
     BTApplyToWindow(w, (name && gTintMode != BR_MODE_NONE) ? [NSAppearance appearanceNamed:name] : nil);
 }
 
-void BRTintRefreshAll(void) {
-    if (![NSThread isMainThread]) {
-        dispatch_async(dispatch_get_main_queue(), ^{ BRTintRefreshAll(); });
-        return;
-    }
+// Does the actual work; must run on the main queue. Deliberately does NOT re-check the thread or
+// re-dispatch — see BRTintRefreshAll. Bails when there's no GUI app (headless daemon: nothing to do).
+static void BRTintApplyMain(void) {
     NSApplication *app = NSApp;
     if (!app) return;
 
@@ -322,4 +320,13 @@ void BRTintRefreshAll(void) {
 
     for (NSWindow *w in app.windows)
         BTApplyToWindow(w, (gTintMode != BR_MODE_NONE) ? appr : nil);
+}
+
+void BRTintRefreshAll(void) {
+    // NB: in headless processes the main queue is drained by a dispatch WORKER thread, so
+    // +[NSThread isMainThread] is false even on the main queue. The block must therefore call the
+    // worker directly — NOT BRTintRefreshAll — or an off-"main" caller re-dispatches itself forever
+    // (100% CPU). Dispatching once and running the worker there is harmless: NSApp is nil, so it no-ops.
+    if ([NSThread isMainThread]) { BRTintApplyMain(); return; }
+    dispatch_async(dispatch_get_main_queue(), ^{ BRTintApplyMain(); });
 }

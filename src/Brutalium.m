@@ -14,6 +14,7 @@
 #import <AppKit/AppKit.h>
 #import <objc/runtime.h>
 #import <notify.h>
+#import <mach-o/dyld.h>
 #import "BRState.h"
 #import "BRConfig.h"
 
@@ -194,6 +195,19 @@ static BOOL BRIsChildProcess(void) {
     return NO;
 }
 
+// Brutalium only styles GUI apps. Broad injectors (ammonia/Plugin Playground) also load us into
+// headless daemons/agents/tools (e.g. localizationswitcherd) that have no windows — running there
+// is pure waste. Decide from the executable PATH via dyld, NOT NSBundle: mainBundle can be nil this
+// early in a freshly-injected process, which wrongly excluded real .app hosts like Dock/Chrome.
+// GUI apps launch from <Bundle>.app/Contents/MacOS/… ; daemons/agents/tools do not. Fail OPEN if the
+// path can't be read, so we never wrongly skip a real app (the CPU spin is fixed at its source anyway).
+static BOOL BRIsGUIApp(void) {
+    char buf[4096]; uint32_t sz = (uint32_t)sizeof(buf);
+    if (_NSGetExecutablePath(buf, &sz) != 0) return YES;
+    NSString *exe = [NSString stringWithUTF8String:buf] ?: @"";
+    return [exe rangeOfString:@".app/Contents/"].location != NSNotFound;
+}
+
 // The screenshot UI relies on vibrancy the tint takeover would break, so tint
 // stays out of it. (Corners/lights are harmless there but irrelevant.)
 static BOOL BRIsScreenshotProcess(NSString *bid) {
@@ -207,6 +221,7 @@ static BOOL BRIsScreenshotProcess(NSString *bid) {
 __attribute__((constructor))
 static void BRSetup(void) {
     if (BRIsChildProcess()) return; // inert in Chromium/Electron helpers
+    if (!BRIsGUIApp())      return; // inert in headless daemons/agents/CLI tools
 
     @autoreleasepool {
         NSString *bid = [[NSBundle mainBundle] bundleIdentifier] ?: @"";
