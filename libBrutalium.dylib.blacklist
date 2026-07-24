@@ -14,6 +14,7 @@ audioclocksyncd
 AudioComponentRegistrar
 authd
 autofsd
+automountd
 backgroundtaskmanagementd
 backupd
 backupd-helper
@@ -72,11 +73,16 @@ csnameddatad
 ctkahp
 ctkd
 dasd
+deviceinterfaced
+diagnostics_agent
 dirhelper
 diskarbitrationd
 DiskUnmountWatcher
 distnoted
+donotdisturbd
 endpointsecurityd
+filecoordinationd
+fileproviderd
 findmybeaconingd
 findmydeviced
 fseventsd
@@ -97,6 +103,7 @@ launchservicesd
 linkd
 locationd
 locationaccessstored
+localizationswitcherd
 logd
 logd_helper
 logind
@@ -137,6 +144,7 @@ runningboardd
 runningboardd
 sandboxd
 searchpartyd
+ScreenTimeSettingsAgent
 secd
 secinitd
 secinitd
@@ -148,6 +156,7 @@ siriinferenced
 sharedfilelistd
 smd
 softwareupdated
+spindump
 StepTwo
 storagekitd
 symptomsd
