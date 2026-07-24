@@ -220,9 +220,53 @@ static inline BOOL BRBloomTest(const char *s, uint64_t lo, uint64_t hi) {
 
 #pragma mark - Publishing
 
+// Notify state is ephemeral: it only survives while some process holds the name registered, and is
+// lost on reboot/logout. So besides posting live notify state, we mirror every word into ONE
+// global-domain key (on-disk, permanent, readable by sandboxed apps at launch — same channel as
+// the lists/images). Apps launched before any live publish (e.g. right after login) read their
+// config from this snapshot instead of getting bare code defaults.
+#define BR_STATE_GLOBAL_KEY CFSTR("com.tweak.brutalium.state")
+
+static inline NSMutableDictionary *br_persistAccum(void) {
+    static NSMutableDictionary *d = nil;
+    if (!d) d = [NSMutableDictionary dictionary];
+    return d;
+}
+
 static inline void BRSetState(const char *name, uint64_t val) {
     int t;
     if (notify_register_check(name, &t) == NOTIFY_STATUS_OK) { notify_set_state(t, val); notify_cancel(t); }
+    br_persistAccum()[@(name)] = @(val);   // mirror for the persistent snapshot
+}
+
+// Write the accumulated snapshot to the global domain. Call once at the end of a publish.
+static inline void BRFlushPersistedState(void) {
+    CFPreferencesSetValue(BR_STATE_GLOBAL_KEY, (__bridge CFPropertyListRef)br_persistAccum(),
+                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    CFPreferencesSynchronize(kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+}
+
+// Tweak-side read: prefer LIVE notify state; when it's empty (0 — e.g. after login before any
+// holder/publisher exists) fall back to the persisted global-domain snapshot so the app still
+// gets the user's saved config rather than code defaults.
+static inline uint64_t BRReadStateWord(int token, const char *name) {
+    uint64_t v = 0;
+    notify_get_state(token, &v);
+    if (v != 0) return v;
+    // Fallback path (notify empty — e.g. cold launch). Flush this process's preferences cache first,
+    // exactly like the lists read does, or a cross-process write from the CLI stays invisible and we
+    // wrongly fall through to code defaults.
+    CFPreferencesAppSynchronize(kCFPreferencesAnyApplication);
+    CFPropertyListRef pl = CFPreferencesCopyValue(BR_STATE_GLOBAL_KEY,
+        kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    if (pl) {
+        if (CFGetTypeID(pl) == CFDictionaryGetTypeID()) {
+            NSNumber *n = ((__bridge NSDictionary *)pl)[@(name)];
+            if ([n isKindOfClass:[NSNumber class]]) v = (uint64_t)n.unsignedLongLongValue;
+        }
+        CFRelease(pl);
+    }
+    return v;
 }
 
 static inline uint32_t br_defColor(NSUserDefaults *d, NSString *key, uint32_t fallback) {
@@ -338,6 +382,9 @@ static inline void BRPublishFromDefaults(NSUserDefaults *d) {
                           (imgs.count ? (__bridge CFPropertyListRef)imgs : NULL),
                           kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
     CFPreferencesSynchronize(kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+
+    // Persist every notify word set above so apps launched before a live publish still get config.
+    BRFlushPersistedState();
 
     notify_post(BR_NOTIFY_CHANGED);
 }

@@ -85,7 +85,7 @@ static void BRRecomputeSelfExclusion(void) {
 }
 
 static void BRRefreshConfig(void) {
-    uint64_t w = 0; notify_get_state(gTokWin, &w);
+    uint64_t w = BRReadStateWord(gTokWin, BR_ST_WIN);
     bool valid = false, m = false, c = false, t = false, sl = false, st = false; double rad = 0, lyrad = 0;
     BRUnpackWin(w, &valid, &m, &c, &t, &sl, &st, &rad, &lyrad);
     if (valid) { gMaster = m; gCorners = c; gToolbar = t; gSquareLayers = sl; gSquareToolbar = st; gCornerRadius = rad; gLayerRadius = lyrad; }
@@ -93,20 +93,20 @@ static void BRRefreshConfig(void) {
 
     BRRecomputeSelfExclusion();
 
-    uint64_t bf = 0; notify_get_state(gTokBorder, &bf);
+    uint64_t bf = BRReadStateWord(gTokBorder, BR_ST_BORDER);
     bool bvalid=false, ben=false, bsh=true; double bsz=1.0;
     BRUnpackBorder(bf, &bvalid, &ben, &bsh, &bsz);
     if (bvalid) { gBorderEnabled = ben; gBorderShadow = bsh; gBorderSize = bsz; }
     else        { gBorderEnabled = NO; gBorderShadow = YES; gBorderSize = 1.0; }
 
-    uint64_t gf = 0; notify_get_state(gTokGlass, &gf);
+    uint64_t gf = BRReadStateWord(gTokGlass, BR_ST_GLASS);
     bool gvalid = false, gfl = false, gauto = true, gimg = false; uint32_t grgba = 0xFFFFFFFF;
     BRUnpackGlass(gf, &gvalid, &gfl, &gauto, &gimg, &grgba);
     if (gvalid) { gGlassFlatten = gfl; gGlassColorAuto = gauto; gGlassImageEnabled = gimg; gGlassColorRGBA = grgba; }
     else        { gGlassFlatten = NO; gGlassColorAuto = YES; gGlassImageEnabled = NO; gGlassColorRGBA = 0xFFFFFFFF; }
     gGlassColorObj = gGlassColorAuto ? nil : BRMakeColor(gGlassColorRGBA);
 
-    uint64_t tb = 0; notify_get_state(gTokTbar, &tb);
+    uint64_t tb = BRReadStateWord(gTokTbar, BR_ST_TBAR);
     bool tbvalid = false, tben = false, tbimg = false; uint32_t tbrgba = 0x1E1E28FF;
     BRUnpackTbar(tb, &tbvalid, &tben, &tbimg, &tbrgba);
     if (tbvalid) { gTitlebarColorEnabled = tben; gTitlebarImageEnabled = tbimg; gTitlebarColorRGBA = tbrgba; }
@@ -115,24 +115,23 @@ static void BRRefreshConfig(void) {
 
     // Decode/refresh all feature images (titlebar, glass, …) from the shared global-domain registry.
     BRImagesRefresh();
-    uint64_t bc = 0; notify_get_state(gTokBColor, &bc);
+    uint64_t bc = BRReadStateWord(gTokBColor, BR_ST_BCOLOR);
     gBorderRGBA = bc ? (uint32_t)bc : 0x000000FF;
     gBorderColorObj = BRMakeColor(gBorderRGBA);
-    uint64_t bci = 0; notify_get_state(gTokBColorI, &bci);
+    uint64_t bci = BRReadStateWord(gTokBColorI, BR_ST_BCOLORI);
     gBorderInactiveRGBA = bci ? (uint32_t)bci : gBorderRGBA; // 0 ⇒ same as active
     gBorderInactiveObj = BRMakeColor(gBorderInactiveRGBA);
 
-    uint64_t lf = 0; notify_get_state(gTokLFlags, &lf);
+    uint64_t lf = BRReadStateWord(gTokLFlags, BR_ST_LFLAGS);
     bool lvalid = false, len = false, limg = false; double lrad = 0, lsz = 0;
     BRUnpackLFlags(lf, &lvalid, &len, &limg, &lrad, &lsz);
     if (lvalid) {
         gLEnabled = len; gLightsImageEnabled = limg; gLRadius = lrad; gLSize = lsz;
-        uint64_t v = 0;
-        notify_get_state(gTokLClose, &v); gLCloseRGBA = (uint32_t)v;
-        v = 0; notify_get_state(gTokLMin,  &v); gLMinRGBA  = (uint32_t)v;
-        v = 0; notify_get_state(gTokLZoom, &v); gLZoomRGBA = (uint32_t)v;
-        v = 0; notify_get_state(gTokLGlyph,&v); gLGlyphRGBA = (uint32_t)v;
-        uint64_t iv = 0; notify_get_state(gTokLInact, &iv);
+        uint64_t v = BRReadStateWord(gTokLClose, BR_ST_LCLOSE); gLCloseRGBA = (uint32_t)v;
+        v = BRReadStateWord(gTokLMin, BR_ST_LMIN); gLMinRGBA  = (uint32_t)v;
+        v = BRReadStateWord(gTokLZoom, BR_ST_LZOOM); gLZoomRGBA = (uint32_t)v;
+        v = BRReadStateWord(gTokLGlyph, BR_ST_LGLYPH); gLGlyphRGBA = (uint32_t)v;
+        uint64_t iv = BRReadStateWord(gTokLInact, BR_ST_LINACT);
         if (iv & BR_AUTO_STATE) gLInactiveAuto = YES;
         else { gLInactiveAuto = NO; gLInactiveRGBA = (uint32_t)iv; }
     } else {
@@ -141,16 +140,16 @@ static void BRRefreshConfig(void) {
         gLGlyphRGBA = 0x0000008C; gLInactiveAuto = YES; gLInactiveRGBA = 0x9B9B9BFF;
     }
 
-    uint64_t tf = 0; notify_get_state(gTokTFlags, &tf);
+    uint64_t tf = BRReadStateWord(gTokTFlags, BR_ST_TFLAGS);
     bool tvalid = false, ten = false, tctl = false, twp = false, tca = false, tta = false, tic = false; int tmode = BR_MODE_AUTO;
     BRUnpackTFlags(tf, &tvalid, &ten, &tmode, &tctl, &twp, &tca, &tta, &tic);
     if (tvalid) { gTintEnabled = ten; gTintMode = tmode; gTintControls = tctl; gTintWallpaper = twp; gTintChromeAuto = tca; gTintTextAuto = tta; gTintIcons = tic; }
     else        { gTintEnabled = NO;  gTintMode = BR_MODE_AUTO; gTintControls = YES; gTintWallpaper = NO; gTintChromeAuto = YES; gTintTextAuto = YES; gTintIcons = NO; }
 
-    uint64_t tc = 0; notify_get_state(gTokTColor, &tc);
+    uint64_t tc = BRReadStateWord(gTokTColor, BR_ST_TCOLOR);
     gTintColorRGBA = tc ? (uint32_t)tc : 0x1E1E28FF;
-    uint64_t tcc = 0; notify_get_state(gTokTChrome, &tcc);
-    uint64_t ttx = 0; notify_get_state(gTokTText, &ttx);
+    uint64_t tcc = BRReadStateWord(gTokTChrome, BR_ST_TCHROME);
+    uint64_t ttx = BRReadStateWord(gTokTText, BR_ST_TTEXT);
 
     // Backgrounds are solid: ignore alpha, force fully opaque.
     uint32_t mainOpaque = (gTintColorRGBA & 0xFFFFFF00) | 0xFF;
