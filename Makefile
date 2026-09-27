@@ -1,10 +1,3 @@
-# Brutalium — Makefile
-#
-# Targets:
-#   make               build the injection dylib and the CLI
-#   sudo make install  install dylib + CLI + blacklist + LaunchAgent
-#   sudo make uninstall
-
 ifeq (,$(filter help,$(MAKECMDGOALS)))
   CC      := $(shell xcrun -find clang)
   SDKROOT ?= $(shell xcrun --show-sdk-path)
@@ -20,13 +13,11 @@ CLI_NAME    = brutalium
 BUILD_DIR   = build
 SRC_DIR     = src
 APP_DIR     = app
-#INSTALL_DIR = /opt/pluginplayground/tweaks
-INSTALL_DIR = /var/ammonia/core/tweaks
+INSTALL_DIR = /opt/dynject/lib/tweaks
 CLI_DIR     = /usr/local/bin
 AGENT_DIR   = /Library/LaunchAgents
 AGENT       = com.tweak.brutalium.publish.plist
 
-# Injected code must cover arm64e for modern system processes.
 TWEAK_ARCHS = -arch x86_64 -arch arm64 -arch arm64e
 
 CFLAGS = -Wall -Wextra -O2 -fobjc-arc \
@@ -38,7 +29,7 @@ CFLAGS = -Wall -Wextra -O2 -fobjc-arc \
 FRAMEWORKS = -framework Foundation -framework AppKit \
              -framework QuartzCore -framework CoreFoundation
 
-DYLIB_SOURCES = $(SRC_DIR)/Brutalium.m $(SRC_DIR)/BRWindows.m $(SRC_DIR)/BRLights.m $(SRC_DIR)/BRTint.m $(SRC_DIR)/BRGlass.m $(SRC_DIR)/BRImages.m $(SRC_DIR)/BRTitlebar.m ZKSwizzle/ZKSwizzle.m
+DYLIB_SOURCES = $(SRC_DIR)/Brutalium.m $(SRC_DIR)/BRWindows.m $(SRC_DIR)/BRLights.m $(SRC_DIR)/BRTint.m $(SRC_DIR)/BRGlass.m $(SRC_DIR)/BRImages.m $(SRC_DIR)/BRTitlebar.m $(SRC_DIR)/BRDock.m ZKSwizzle/ZKSwizzle.m
 CLI_SOURCE    = $(SRC_DIR)/clitool.m
 
 DYLIB_FLAGS = -dynamiclib -install_name @rpath/$(DYLIB_NAME) \
@@ -57,13 +48,15 @@ $(BUILD_DIR):
 $(BUILD_DIR)/$(DYLIB_NAME): | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(TWEAK_ARCHS) $(DYLIB_FLAGS) $(DYLIB_SOURCES) -o $@ \
 		-F/System/Library/PrivateFrameworks $(FRAMEWORKS)
+	codesign --force --sign - --timestamp=none $@
 
 $(BUILD_DIR)/$(CLI_NAME): | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(TWEAK_ARCHS) $(CLI_SOURCE) \
 		-framework Foundation -framework CoreFoundation \
 		-framework ImageIO -framework CoreGraphics -o $@
+	codesign --force --sign - --timestamp=none $@
 
-install: all ## Install dylib + CLI + blacklist + LaunchAgent
+install: all
 	sudo mkdir -p $(INSTALL_DIR) $(CLI_DIR)
 	sudo install -m 755 $(BUILD_DIR)/$(DYLIB_NAME) $(INSTALL_DIR)
 	sudo install -m 755 $(BUILD_DIR)/$(CLI_NAME) $(CLI_DIR)
@@ -71,20 +64,17 @@ install: all ## Install dylib + CLI + blacklist + LaunchAgent
 		sudo install -m 644 $(BLACKLIST_SRC) $(BLACKLIST_DEST); \
 	fi
 	@sudo install -m 644 $(APP_DIR)/$(AGENT) $(AGENT_DIR)/ 2>/dev/null || true
-	@echo "Installed $(DYLIB_NAME) and $(CLI_NAME)."
-	@echo "Ammonia injects at launch — relaunch apps to see the changes."
-	@echo "Run 'brutalium publish' (or log out/in) so sandboxed apps pick up settings."
 
-uninstall: ## Remove installed files
+uninstall:
 	sudo rm -f $(INSTALL_DIR)/$(DYLIB_NAME)
 	sudo rm -f $(CLI_DIR)/$(CLI_NAME)
 	sudo rm -f $(BLACKLIST_DEST)
 	sudo rm -f $(AGENT_DIR)/$(AGENT)
 	@echo "Uninstalled $(PROJECT)."
 
-clean: ## Remove build artifacts
+clean:
 	@rm -rf $(BUILD_DIR)
 
-help: ## Show this help
+help:
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | \
 		awk 'BEGIN{FS=":.*## "}{printf "  %-12s %s\n", $$1, $$2}'

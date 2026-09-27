@@ -44,6 +44,7 @@ static void BTSwizzleClassMethod(SEL sel, IMP newImp) {
 }
 
 // --- Background overrides ---
+static NSColor *BRTintAltRow(void);   // fwd: subtle alternating-row sibling of the background
 static NSColor *imp_windowBg(id self, SEL _cmd) {
     return BRTintActive() ? gTintColorObj : BTCallOrig(self, _cmd);
 }
@@ -53,13 +54,20 @@ static NSColor *imp_underPage(id self, SEL _cmd) {
 static NSColor *imp_controlBg(id self, SEL _cmd) {
     return (BRTintActive() && gTintControls) ? gTintColorObj : BTCallOrig(self, _cmd);
 }
+// Accent accessor (buttons, checkboxes, focus rings use this directly, not only the CoreUI funnel).
+static NSColor *imp_controlAccent(id self, SEL _cmd) {
+    return (BRTintActive() && gTintAccentObj) ? gTintAccentObj : BTCallOrig(self, _cmd);
+}
+// Alternating row backgrounds: return [background, subtle sibling] so both rows follow the palette.
+static id (*orig_altRows)(id, SEL) = NULL;
+static id imp_altRows(id self, SEL _cmd) {
+    if (!BRTintActive() || !gTintColorObj) return orig_altRows ? orig_altRows(self, _cmd) : nil;
+    NSColor *alt = BRTintAltRow() ?: gTintColorObj;
+    return @[ gTintColorObj, alt ];
+}
 
-// --- Foreground (text / label) overrides — a precise colour, agnostic of the
-// base colour and the appearance. Off by default (textAuto) so text follows the
-// forced appearance as before; when a colour is set we vend it for the primary
-// label/text colours and alpha-reduced variants for the label hierarchy. We
-// deliberately leave selection text colours alone (they sit on the accent
-// highlight, where a forced foreground would often be unreadable).
+// Text colour override — off by default (textAuto), agnostic of the base colour. We leave
+// selection text alone since it sits on the accent highlight, where forcing it often reads badly.
 static NSColor *gTxtBase, *gTxt55, *gTxt25, *gTxt10;
 static void BTEnsureTextCache(void) {
     if (gTxtBase == gTintTextObj) return;       // gTintTextObj is rebuilt on each refresh
@@ -86,16 +94,82 @@ static NSColor *imp_textQuaternary(id self, SEL _cmd) {
     BTEnsureTextCache(); return gTxt10;
 }
 
+#pragma mark - Layer 2: CoreUI named colours (NSAppearance _customColor:)
+
+// Curated system-name → palette map. Recognises only SYSTEM semantic names; anything unrecognised
+// (app-private asset colours like KeyColor / PlateGradientStartColor) returns nil and is left alone.
+static NSColor *BRTintSeparator(void) {
+    return gTintTextObj ? [gTintTextObj colorWithAlphaComponent:0.22] : nil;
+}
+// A subtle sibling of the background for alternating table rows (lighten a dark base, darken a light one).
+static NSColor *BRTintAltRow(void) {
+    if (!gTintColorObj) return nil;
+    NSColor *toward = BRColorIsLight(gTintColorRGBA) ? NSColor.blackColor : NSColor.whiteColor;
+    return [gTintColorObj blendedColorWithFraction:0.06 ofColor:toward] ?: gTintColorObj;
+}
+static NSColor *BRTintSystemColor(NSString *name) {
+    if (!BRTintActive() || name.length == 0) return nil;
+    NSString *l = name.lowercaseString;
+    // Leave selected-* TEXT native so selected rows / menu items keep their contrast.
+    if ([l containsString:@"selected"] && ([l containsString:@"text"] || [l containsString:@"label"]))
+        return nil;
+    if (([l containsString:@"text"] || [l containsString:@"label"]) && ![l containsString:@"background"])
+        return gTintTextAuto ? nil : gTintTextObj;
+    if ([l containsString:@"alternat"])                          // alternating row backgrounds
+        return BRTintAltRow();
+    if ([l containsString:@"accent"] || [l containsString:@"selectedcontent"] ||
+        [l containsString:@"selectedcontrol"] || [l containsString:@"keyboardfocus"])
+        return gTintAccentObj;                        // nil when accent is auto ⇒ leave native
+    if ([l containsString:@"separator"] || [l containsString:@"divider"] || [l containsString:@"grid"])
+        return BRTintSeparator();
+    if ([l containsString:@"background"])
+        return gTintColorObj;
+    if ([l containsString:@"control"] || [l containsString:@"fill"] || [l containsString:@"header"])
+        return gTintChromeObj;
+    return nil;                                       // unrecognised → app-private → leave alone
+}
+
+static NSColor *(*orig_customColor)(id, SEL, NSString *) = NULL;
+static NSColor *bt_customColor(id self, SEL _cmd, NSString *name) {
+    NSColor *sub = [name isKindOfClass:[NSString class]] ? BRTintSystemColor(name) : nil;
+    return sub ?: (orig_customColor ? orig_customColor(self, _cmd, name) : nil);
+}
+static CGColorRef (*orig_copyCustomCGColor)(id, SEL, NSString *) = NULL;
+static CGColorRef bt_copyCustomCGColor(id self, SEL _cmd, NSString *name) {
+    NSColor *sub = [name isKindOfClass:[NSString class]] ? BRTintSystemColor(name) : nil;
+    if (sub) return CGColorRetain(sub.CGColor);       // +1 to honour the -copy… ownership contract
+    return orig_copyCustomCGColor ? orig_copyCustomCGColor(self, _cmd, name) : NULL;
+}
+static NSColor *(*orig_colorNamedBundle)(id, SEL, NSString *, NSBundle *) = NULL;
+static NSColor *bt_colorNamedBundle(id self, SEL _cmd, NSString *name, NSBundle *b) {
+    // Asset-catalog path: restrict to AppKit-internal (_NS…) names so app-private assets are untouched.
+    if ([name isKindOfClass:[NSString class]] && [name hasPrefix:@"_NS"]) {
+        NSColor *sub = BRTintSystemColor(name);
+        if (sub) return sub;
+    }
+    return orig_colorNamedBundle ? orig_colorNamedBundle(self, _cmd, name, b) : nil;
+}
+
+// Hook the CoreUI colour funnels (reaches control fills / accent / control text / dividers that the
+// NSColor accessor swizzles miss) + the AppKit-internal asset-colour path.
+static void BRTintArmCoreUI(void) {
+    Class ap = [NSAppearance class];
+    Method mc = class_getInstanceMethod(ap, sel_registerName("_customColor:"));
+    if (mc) { orig_customColor = (NSColor *(*)(id, SEL, NSString *))method_getImplementation(mc);
+              method_setImplementation(mc, (IMP)bt_customColor); }
+    Method mg = class_getInstanceMethod(ap, sel_registerName("_copyCustomCGColor:"));
+    if (mg) { orig_copyCustomCGColor = (CGColorRef (*)(id, SEL, NSString *))method_getImplementation(mg);
+              method_setImplementation(mg, (IMP)bt_copyCustomCGColor); }
+    Method mn = class_getClassMethod([NSColor class], @selector(colorNamed:bundle:));
+    if (mn) { orig_colorNamedBundle = (NSColor *(*)(id, SEL, NSString *, NSBundle *))method_getImplementation(mn);
+              method_setImplementation(mn, (IMP)bt_colorNamedBundle); }
+}
+
 #pragma mark - NSVisualEffectView takeover
 
-// Toolbars/sidebars/sheets fill themselves with an NSVisualEffectView whose
-// material renders a derived shade; we override its layer update to paint the
-// exact opaque chrome colour and suppress the private material sublayers.
-// Menus/popovers/tooltips draw their per-item hover highlight inside their own
-// vibrant material; taking that material over flattens the highlight, so a hovered
-// submenu item stops standing out. Leave those materials (and menu/popover windows)
-// native so selection stays visible. Other materials (sidebar/titlebar/etc.) are
-// still recoloured.
+// Toolbars/sidebars/sheets fill with an NSVisualEffectView; we take over its layer to paint the
+// chrome colour instead. Menu/popover/tooltip materials draw their own hover highlight, so
+// recolouring those would kill the highlight — leave those native, recolour everything else.
 static BOOL BTSkipEffectView(NSView *v) {
     if ([v respondsToSelector:@selector(material)]) {
         NSVisualEffectMaterial m = ((NSVisualEffectView *)v).material;
@@ -122,7 +196,12 @@ static void bt_veUpdateLayer(id self, SEL _cmd) {
     @try {
         v.wantsLayer = YES;
         CALayer *host = v.layer;
-        host.backgroundColor = gTintChromeObj.CGColor;
+        // Sidebar gets its own colour when sidebar tint is explicitly set (not "auto") — otherwise
+        // it follows the general chrome tint like every other vibrancy area.
+        NSColor *fill = gTintChromeObj;
+        if (gSidebarTintEnabled && !gSidebarTintAuto && BRIsSidebarView(v))
+            fill = BRMakeColor(gSidebarTintRGBA);
+        host.backgroundColor = fill.CGColor;
         host.contents = nil;
         NSMutableSet *keep = [NSMutableSet set];
         for (NSView *sv in v.subviews)
@@ -136,7 +215,10 @@ static void BTMarkEffectViews(NSView *v) {
     if (!v) return;
     if ([v isKindOfClass:NSClassFromString(@"NSVisualEffectView")] && !BTSkipEffectView(v)) {
         v.needsDisplay = YES;
-        v.layer.backgroundColor = BRTintActive() ? gTintChromeObj.CGColor : NULL;
+        NSColor *fill = gTintChromeObj;
+        if (gSidebarTintEnabled && !gSidebarTintAuto && BRIsSidebarView(v))
+            fill = BRMakeColor(gSidebarTintRGBA);
+        v.layer.backgroundColor = BRTintActive() ? fill.CGColor : NULL;
     }
     for (NSView *s in v.subviews) BTMarkEffectViews(s);
 }
@@ -266,6 +348,14 @@ void BRTintArm(void) {
     BTSwizzleClassMethod(@selector(windowBackgroundColor),    (IMP)imp_windowBg);
     BTSwizzleClassMethod(@selector(underPageBackgroundColor), (IMP)imp_underPage);
     BTSwizzleClassMethod(@selector(controlBackgroundColor),   (IMP)imp_controlBg);
+    BTSwizzleClassMethod(@selector(controlAccentColor),       (IMP)imp_controlAccent);
+
+    // Alternating table/list rows: override the colour pair (store orig separately — it returns an array).
+    for (NSString *an in @[ @"alternatingContentBackgroundColors", @"controlAlternatingRowBackgroundColors" ]) {
+        Method am = class_getClassMethod([NSColor class], NSSelectorFromString(an));
+        if (am) { if (!orig_altRows) orig_altRows = (id (*)(id, SEL))method_getImplementation(am);
+                  method_setImplementation(am, (IMP)imp_altRows); }
+    }
 
     // Foreground / text — precise, base-agnostic. No-ops while textAuto is on.
     // NOTE: we deliberately do NOT override the selection text colours
@@ -298,6 +388,8 @@ void BRTintArm(void) {
             method_setImplementation(own, (IMP)bt_veUpdateLayer);
         }
     }
+
+    BRTintArmCoreUI();   // Layer 2: CoreUI named-colour funnels
 }
 
 void BRTintApply(NSWindow *w) {
@@ -320,6 +412,7 @@ static void BRTintApplyMain(void) {
 
     for (NSWindow *w in app.windows)
         BTApplyToWindow(w, (gTintMode != BR_MODE_NONE) ? appr : nil);
+
 }
 
 void BRTintRefreshAll(void) {

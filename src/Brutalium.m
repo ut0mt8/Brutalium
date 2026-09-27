@@ -21,10 +21,27 @@
 #pragma mark - Config cache (defined here, declared extern in BRConfig.h)
 
 BOOL     gMaster = YES, gCorners = YES, gToolbar = YES;
-BOOL     gSquareLayers = NO;
-BOOL     gSquareToolbar = NO;
+BOOL     gSlimToolbar = NO;
+double   gSlimToolbarHeight = 36.0;
+double   gSlimRadius = 5.0;
+BOOL     gDockFlat = NO;
+uint32_t gDockColorRGBA = 0x1C1C1EE6;
+double   gDockRadius = 0.0;
+BOOL     gDockBorderEnabled = NO;
+uint32_t gDockBorderRGBA = 0xFFFFFFFF;
+double   gDockBorderSize = 1.0;
+BOOL     gSidebarTintEnabled = NO;
+uint32_t gSidebarTintRGBA = 0x1E1E28FF;
+BOOL     gSidebarTintAuto = YES;
+BOOL     gSidebarCornersEnabled = NO;
+double   gSidebarCornersRadius = 0.0;
+BOOL     gSquareMenus = NO;
+BOOL     gSquareElements = NO;
+BOOL     gMenuShadow = NO;          // keep menu shadow when squaring (default: strip)
+uint32_t gMenuSelectRGBA = 0;       // custom menu selection colour (0 = system default)
+double   gElementsRadius = 0.0;     // radius for corners elements (0 = square)
+double   gMenuRadius = 0.0;         // radius for corners menus (0 = square)
 double   gCornerRadius = 0.0;
-double   gLayerRadius = 0.0;   // radius applied by 'corners layers' (0 == square)
 BOOL     gSelfExcluded = NO;
 
 BOOL     gLEnabled = YES, gLightsImageEnabled = NO;
@@ -42,7 +59,7 @@ BOOL     gTintChromeAuto = YES;
 BOOL     gTintTextAuto = YES;
 BOOL     gTintIcons = NO;
 uint32_t gTintColorRGBA = 0x1E1E28FF, gTintChromeRGBA = 0x2C2C3CFF, gTintTextRGBA = 0xE6E6E6FF;
-NSColor *gTintColorObj = nil, *gTintChromeObj = nil, *gTintTextObj = nil;
+NSColor *gTintColorObj = nil, *gTintChromeObj = nil, *gTintTextObj = nil, *gTintAccentObj = nil;
 
 BOOL     gGlassFlatten = NO, gGlassColorAuto = YES, gGlassImageEnabled = NO;
 uint32_t gGlassColorRGBA = 0xFFFFFFFF;
@@ -59,10 +76,14 @@ BOOL     gBorderEnabled = NO, gBorderShadow = YES;
 double   gBorderSize = 1.0;
 uint32_t gBorderRGBA = 0x000000FF, gBorderInactiveRGBA = 0x000000FF;
 NSColor *gBorderColorObj = nil, *gBorderInactiveObj = nil;
+uint32_t gBorderEdgeRGBA[4] = {0,0,0,0};
+BOOL     gBorderEdgeImageEnabled[4] = {NO,NO,NO,NO};
+uint32_t gBorderCornerRGBA[4] = {0,0,0,0};
+BOOL     gBorderCornerImageEnabled[4] = {NO,NO,NO,NO};
 
 static int gTokWin,
            gTokLFlags, gTokLClose, gTokLMin, gTokLZoom, gTokLInact, gTokLGlyph,
-           gTokTFlags, gTokTColor, gTokTChrome, gTokTText,
+           gTokTFlags, gTokTColor, gTokTChrome, gTokTText, gTokTAccent,
            gTokBorder, gTokBColor, gTokBColorI, gTokGlass, gTokTbar;
 
 static void BRRecomputeSelfExclusion(void) {
@@ -83,14 +104,82 @@ static void BRRecomputeSelfExclusion(void) {
         gSelfNoTitlebar   = [nt isKindOfClass:[NSArray class]] && [nt containsObject:bid];
         gGlassSelfExcluded = [gl isKindOfClass:[NSArray class]] && [gl containsObject:bid];
     }
+    // Menu appearance options (read from global defaults alongside the lists).
+    id msObj = (id)CFBridgingRelease(CFPreferencesCopyValue(CFSTR("com.tweak.brutalium.menu.shadow"),
+        kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+    gMenuShadow = [msObj isKindOfClass:[NSNumber class]] && [msObj boolValue];
+    id mcObj = (id)CFBridgingRelease(CFPreferencesCopyValue(CFSTR("com.tweak.brutalium.menu.selectcolor"),
+        kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+    gMenuSelectRGBA = [mcObj isKindOfClass:[NSNumber class]] ? (uint32_t)[mcObj unsignedIntValue] : 0;
+    id crObj = (id)CFBridgingRelease(CFPreferencesCopyValue(CFSTR("com.tweak.brutalium.elements.radius"),
+        kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+    gElementsRadius = [crObj isKindOfClass:[NSNumber class]] ? [crObj doubleValue] : 0.0;
+    id mrObj = (id)CFBridgingRelease(CFPreferencesCopyValue(CFSTR("com.tweak.brutalium.menus.radius"),
+        kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+    gMenuRadius = [mrObj isKindOfClass:[NSNumber class]] ? [mrObj doubleValue] : 0.0;
+    // Slim toolbar
+    id stObj = (id)CFBridgingRelease(CFPreferencesCopyValue(CFSTR("com.tweak.brutalium.toolbar.slim"),
+        kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+    gSlimToolbar = [stObj isKindOfClass:[NSNumber class]] && [stObj boolValue];
+    id sthObj = (id)CFBridgingRelease(CFPreferencesCopyValue(CFSTR("com.tweak.brutalium.toolbar.slim.height"),
+        kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+    gSlimToolbarHeight = [sthObj isKindOfClass:[NSNumber class]] ? [sthObj doubleValue] : 36.0;
+    if (gSlimToolbarHeight < 24.0) gSlimToolbarHeight = 24.0;
+    if (gSlimToolbarHeight > 52.0) gSlimToolbarHeight = 52.0;
+    id srObj = (id)CFBridgingRelease(CFPreferencesCopyValue(CFSTR("com.tweak.brutalium.toolbar.slim.radius"),
+        kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+    gSlimRadius = [srObj isKindOfClass:[NSNumber class]] ? [srObj doubleValue] : 5.0;
+    if (gSlimRadius < 0.0) gSlimRadius = 0.0;
+
+    // Dock flat background + corner radius
+    id dfObj = (id)CFBridgingRelease(CFPreferencesCopyValue(CFSTR("com.tweak.brutalium.dock.flat"),
+        kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+    gDockFlat = [dfObj isKindOfClass:[NSNumber class]] && [dfObj boolValue];
+    id dcObj = (id)CFBridgingRelease(CFPreferencesCopyValue(CFSTR("com.tweak.brutalium.dock.color"),
+        kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+    gDockColorRGBA = [dcObj isKindOfClass:[NSNumber class]] ? (uint32_t)[dcObj unsignedLongLongValue] : 0x1C1C1EE6;
+    id drObj = (id)CFBridgingRelease(CFPreferencesCopyValue(CFSTR("com.tweak.brutalium.dock.radius"),
+        kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+    gDockRadius = [drObj isKindOfClass:[NSNumber class]] ? [drObj doubleValue] : 0.0;
+    if (gDockRadius < 0.0) gDockRadius = 0.0;
+    id dbeObj = (id)CFBridgingRelease(CFPreferencesCopyValue(CFSTR("com.tweak.brutalium.dock.border"),
+        kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+    gDockBorderEnabled = [dbeObj isKindOfClass:[NSNumber class]] && [dbeObj boolValue];
+    id dbcObj = (id)CFBridgingRelease(CFPreferencesCopyValue(CFSTR("com.tweak.brutalium.dock.border.color"),
+        kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+    gDockBorderRGBA = [dbcObj isKindOfClass:[NSNumber class]] ? (uint32_t)[dbcObj unsignedLongLongValue] : 0xFFFFFFFF;
+    id dbsObj = (id)CFBridgingRelease(CFPreferencesCopyValue(CFSTR("com.tweak.brutalium.dock.border.size"),
+        kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+    gDockBorderSize = [dbsObj isKindOfClass:[NSNumber class]] ? [dbsObj doubleValue] : 1.0;
+    if (gDockBorderSize < 0.0) gDockBorderSize = 0.0;
+
+    // Sidebar tint + squaring
+    id steObj = (id)CFBridgingRelease(CFPreferencesCopyValue(CFSTR("com.tweak.brutalium.sidebar.tint"),
+        kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+    gSidebarTintEnabled = [steObj isKindOfClass:[NSNumber class]] && [steObj boolValue];
+    id stcObj = (id)CFBridgingRelease(CFPreferencesCopyValue(CFSTR("com.tweak.brutalium.sidebar.tint.color"),
+        kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+    if ([stcObj isKindOfClass:[NSNumber class]]) {
+        gSidebarTintRGBA = (uint32_t)[stcObj unsignedLongLongValue];
+        gSidebarTintAuto = NO;
+    } else {
+        gSidebarTintAuto = YES;
+    }
+    id sceObj = (id)CFBridgingRelease(CFPreferencesCopyValue(CFSTR("com.tweak.brutalium.sidebar.corners"),
+        kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+    gSidebarCornersEnabled = [sceObj isKindOfClass:[NSNumber class]] && [sceObj boolValue];
+    id scrObj = (id)CFBridgingRelease(CFPreferencesCopyValue(CFSTR("com.tweak.brutalium.sidebar.corners.radius"),
+        kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+    gSidebarCornersRadius = [scrObj isKindOfClass:[NSNumber class]] ? [scrObj doubleValue] : 0.0;
+    if (gSidebarCornersRadius < 0.0) gSidebarCornersRadius = 0.0;
 }
 
 static void BRRefreshConfig(void) {
     uint64_t w = BRReadStateWord(gTokWin, BR_ST_WIN);
-    bool valid = false, m = false, c = false, t = false, sl = false, st = false; double rad = 0, lyrad = 0;
-    BRUnpackWin(w, &valid, &m, &c, &t, &sl, &st, &rad, &lyrad);
-    if (valid) { gMaster = m; gCorners = c; gToolbar = t; gSquareLayers = sl; gSquareToolbar = st; gCornerRadius = rad; gLayerRadius = lyrad; }
-    else       { gMaster = YES; gCorners = YES; gToolbar = YES; gSquareLayers = NO; gSquareToolbar = NO; gCornerRadius = 0.0; gLayerRadius = 0.0; }
+    bool valid = false, m = false, c = false, t = false, sm = false, se = false; double rad = 0;
+    BRUnpackWin(w, &valid, &m, &c, &t, &sm, &se, &rad);
+    if (valid) { gMaster = m; gCorners = c; gToolbar = t; gSquareMenus = sm; gSquareElements = se; gCornerRadius = rad; }
+    else       { gMaster = YES; gCorners = YES; gToolbar = YES; gSquareMenus = NO; gSquareElements = NO; gCornerRadius = 0.0; }
 
     BRRecomputeSelfExclusion();
 
@@ -114,6 +203,7 @@ static void BRRefreshConfig(void) {
     else         { gTitlebarColorEnabled = NO;   gTitlebarImageEnabled = NO;    gTitlebarColorRGBA = 0x1E1E28FF; }
     gTitlebarColorObj = BRMakeColor(gTitlebarColorRGBA);
 
+
     // Decode/refresh all feature images (titlebar, glass, …) from the shared global-domain registry.
     BRImagesRefresh();
     uint64_t bc = BRReadStateWord(gTokBColor, BR_ST_BCOLOR);
@@ -122,6 +212,31 @@ static void BRRefreshConfig(void) {
     uint64_t bci = BRReadStateWord(gTokBColorI, BR_ST_BCOLORI);
     gBorderInactiveRGBA = bci ? (uint32_t)bci : gBorderRGBA; // 0 ⇒ same as active
     gBorderInactiveObj = BRMakeColor(gBorderInactiveRGBA);
+
+    // Per-edge / per-corner border overrides (transported via global defaults — small, infrequent).
+    {
+        static NSString * const edgeKeys[4]   = { @"top", @"right", @"bottom", @"left" };
+        static NSString * const cornerKeys[4] = { @"tl", @"tr", @"br", @"bl" };
+        for (int i = 0; i < 4; i++) {
+            NSString *ek = [NSString stringWithFormat:@"com.tweak.brutalium.border.edge.%@", edgeKeys[i]];
+            id ev = (id)CFBridgingRelease(CFPreferencesCopyValue((__bridge CFStringRef)ek,
+                kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+            gBorderEdgeRGBA[i] = [ev isKindOfClass:[NSNumber class]] ? (uint32_t)[ev unsignedLongLongValue] : 0;
+            NSString *eik = [NSString stringWithFormat:@"com.tweak.brutalium.border.edge.%@.image", edgeKeys[i]];
+            id eiv = (id)CFBridgingRelease(CFPreferencesCopyValue((__bridge CFStringRef)eik,
+                kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+            gBorderEdgeImageEnabled[i] = [eiv isKindOfClass:[NSNumber class]] && [eiv boolValue];
+
+            NSString *ck = [NSString stringWithFormat:@"com.tweak.brutalium.border.corner.%@", cornerKeys[i]];
+            id cv = (id)CFBridgingRelease(CFPreferencesCopyValue((__bridge CFStringRef)ck,
+                kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+            gBorderCornerRGBA[i] = [cv isKindOfClass:[NSNumber class]] ? (uint32_t)[cv unsignedLongLongValue] : 0;
+            NSString *cik = [NSString stringWithFormat:@"com.tweak.brutalium.border.corner.%@.image", cornerKeys[i]];
+            id civ = (id)CFBridgingRelease(CFPreferencesCopyValue((__bridge CFStringRef)cik,
+                kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+            gBorderCornerImageEnabled[i] = [civ isKindOfClass:[NSNumber class]] && [civ boolValue];
+        }
+    }
 
     uint64_t lf = BRReadStateWord(gTokLFlags, BR_ST_LFLAGS);
     bool lvalid = false, len = false, limg = false; double lrad = 0, lsz = 0;
@@ -151,6 +266,7 @@ static void BRRefreshConfig(void) {
     gTintColorRGBA = tc ? (uint32_t)tc : 0x1E1E28FF;
     uint64_t tcc = BRReadStateWord(gTokTChrome, BR_ST_TCHROME);
     uint64_t ttx = BRReadStateWord(gTokTText, BR_ST_TTEXT);
+    uint64_t tac = BRReadStateWord(gTokTAccent, BR_ST_TACCENT);
 
     // Backgrounds are solid: ignore alpha, force fully opaque.
     uint32_t mainOpaque = (gTintColorRGBA & 0xFFFFFF00) | 0xFF;
@@ -159,9 +275,12 @@ static void BRRefreshConfig(void) {
                                                     : (((uint32_t)tcc & 0xFFFFFF00) | 0xFF);
     gTintChromeObj = BRMakeColor(gTintChromeRGBA);
 
-    // Precise text colour (opaque); only applied when textAuto is off.
-    gTintTextRGBA = ttx ? (((uint32_t)ttx & 0xFFFFFF00) | 0xFF) : 0xE6E6E6FF;
+    // Text: explicit override, else derive a legible contrast from the base.
+    gTintTextRGBA = ttx ? (((uint32_t)ttx & 0xFFFFFF00) | 0xFF) : BRDeriveText(mainOpaque);
     gTintTextObj = BRMakeColor(gTintTextRGBA);
+    // Accent: explicit override, else derive a vivid accent from the base (never nil ⇒ we own the
+    // accent rather than deferring to the system, so selections/active controls follow the palette).
+    gTintAccentObj = BRMakeColor(tac ? (((uint32_t)tac & 0xFFFFFF00) | 0xFF) : BRDeriveAccent(mainOpaque));
 }
 
 #pragma mark - Discovery
@@ -195,12 +314,10 @@ static BOOL BRIsChildProcess(void) {
     return NO;
 }
 
-// Brutalium only styles GUI apps. Broad injectors (ammonia/Plugin Playground) also load us into
-// headless daemons/agents/tools (e.g. localizationswitcherd) that have no windows — running there
-// is pure waste. Decide from the executable PATH via dyld, NOT NSBundle: mainBundle can be nil this
-// early in a freshly-injected process, which wrongly excluded real .app hosts like Dock/Chrome.
-// GUI apps launch from <Bundle>.app/Contents/MacOS/… ; daemons/agents/tools do not. Fail OPEN if the
-// path can't be read, so we never wrongly skip a real app (the CPU spin is fixed at its source anyway).
+// Brutalium only styles GUI apps — broad injectors also load us into headless daemons/agents with
+// no windows, which is pure waste. Decide from the executable path (dyld), not NSBundle, since
+// mainBundle can be nil this early and wrongly excluded real apps like Dock/Chrome. GUI apps launch
+// from <Bundle>.app/Contents/MacOS/…; daemons don't. Fail open on a read error, never skip a real app.
 static BOOL BRIsGUIApp(void) {
     char buf[4096]; uint32_t sz = (uint32_t)sizeof(buf);
     if (_NSGetExecutablePath(buf, &sz) != 0) return YES;
@@ -208,20 +325,16 @@ static BOOL BRIsGUIApp(void) {
     return [exe rangeOfString:@".app/Contents/"].location != NSNotFound;
 }
 
-// The screenshot UI relies on vibrancy the tint takeover would break, so tint
-// stays out of it. (Corners/lights are harmless there but irrelevant.)
 static BOOL BRIsScreenshotProcess(NSString *bid) {
     if ([bid rangeOfString:@"screencapture" options:NSCaseInsensitiveSearch].location != NSNotFound) return YES;
     if ([bid rangeOfString:@"screenshot"    options:NSCaseInsensitiveSearch].location != NSNotFound) return YES;
     return NO;
 }
 
-#pragma mark - Entry point
-
 __attribute__((constructor))
 static void BRSetup(void) {
-    if (BRIsChildProcess()) return; // inert in Chromium/Electron helpers
-    if (!BRIsGUIApp())      return; // inert in headless daemons/agents/CLI tools
+    if (BRIsChildProcess()) return;
+    if (!BRIsGUIApp())      return;
 
     @autoreleasepool {
         NSString *bid = [[NSBundle mainBundle] bundleIdentifier] ?: @"";
@@ -241,6 +354,7 @@ static void BRSetup(void) {
     notify_register_check(BR_ST_TCOLOR, &gTokTColor);
     notify_register_check(BR_ST_TCHROME, &gTokTChrome);
     notify_register_check(BR_ST_TTEXT,  &gTokTText);
+    notify_register_check(BR_ST_TACCENT, &gTokTAccent);
     notify_register_check(BR_ST_BORDER, &gTokBorder);
     notify_register_check(BR_ST_BCOLOR, &gTokBColor);
     notify_register_check(BR_ST_BCOLORI, &gTokBColorI);
@@ -253,6 +367,7 @@ static void BRSetup(void) {
     BRLightsArm();
     BRTintArm();
     BRGlassArm();
+    BRDockArm();   // inert everywhere except com.apple.dock
 
     NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
     void (^onWindow)(NSNotification *) = ^(NSNotification *n) {
@@ -282,7 +397,11 @@ static void BRSetup(void) {
                              ^(int __unused t) {
         BRRefreshConfig();
         BRApplyAll(YES);
+        BRDockForceRelayout();   // no-op outside com.apple.dock
     });
 
-    dispatch_async(dispatch_get_main_queue(), ^{ BRApplyAll(NO); });
+    dispatch_async(dispatch_get_main_queue(), ^{
+        BRApplyAll(NO);
+        BRDockForceRelayout();
+    });
 }

@@ -35,6 +35,7 @@
 #define BR_ST_TCOLOR  "com.tweak.brutalium.st.tcolor"   // 0xRRGGBBAA — main background
 #define BR_ST_TCHROME "com.tweak.brutalium.st.tchrome"  // 0xRRGGBBAA — sidebar/titlebar/toolbar
 #define BR_ST_TTEXT   "com.tweak.brutalium.st.ttext"    // 0xRRGGBBAA — precise text/label colour
+#define BR_ST_TACCENT "com.tweak.brutalium.st.taccent"  // 0xRRGGBBAA — accent/selection (0 ⇒ auto)
 
 #define BR_SUITE      @"com.tweak.brutalium"
 #define BR_AUTO_STATE (1ULL << 32)
@@ -44,30 +45,26 @@ enum { BR_MODE_AUTO = 0, BR_MODE_LIGHT = 1, BR_MODE_DARK = 2, BR_MODE_NONE = 3 }
 
 #pragma mark - Window flags
 
-// bit63 valid · bit0 master · bit1 corners · bit2 toolbar · bit3 squareLayers · bit4 squareToolbar
-// bits 8..23 radius q8 · bits 24..39 layerRadius q8 (radius applied by 'corners layers'; 0 == square)
-static inline uint64_t BRPackWin(BOOL master, BOOL corners, BOOL toolbar, BOOL squareLayers, BOOL squareToolbar, double radius, double layerRadius) {
+// bit63 valid · bit0 master · bit1 corners · bit2 toolbar · bit5 squareMenus · bit7 squareElements
+// bits 8..23 radius q8 (window corner radius)
+static inline uint64_t BRPackWin(BOOL master, BOOL corners, BOOL toolbar, BOOL squareMenus, BOOL squareElements, double radius) {
     uint64_t v = (1ULL << 63);
     if (master)  v |= 1ULL;
     if (corners) v |= 2ULL;
     if (toolbar) v |= 4ULL;
-    if (squareLayers)  v |= 8ULL;
-    if (squareToolbar) v |= 16ULL;
+    if (squareMenus)   v |= 32ULL;
+    if (squareElements) v |= 128ULL;
     uint16_t rq = (uint16_t)lround(fmax(0.0, radius) * 256.0);
     v |= ((uint64_t)rq) << 8;
-    uint16_t lrq = (uint16_t)lround(fmax(0.0, layerRadius) * 256.0);
-    v |= ((uint64_t)lrq) << 24;
     return v;
 }
-static inline void BRUnpackWin(uint64_t v, bool *valid, bool *master, bool *corners,
-                               bool *toolbar, bool *squareLayers, bool *squareToolbar,
-                               double *radius, double *layerRadius) {
+static inline void BRUnpackWin(uint64_t v, bool *valid, bool *master, bool *corners, bool *toolbar,
+                               bool *squareMenus, bool *squareElements, double *radius) {
     *valid = (v >> 63) & 1ULL; *master = v & 1ULL;
     *corners = (v >> 1) & 1ULL; *toolbar = (v >> 2) & 1ULL;
-    *squareLayers  = (v >> 3) & 1ULL;
-    *squareToolbar = (v >> 4) & 1ULL;
-    *radius      = (double)((v >> 8)  & 0xFFFF) / 256.0;
-    *layerRadius = (double)((v >> 24) & 0xFFFF) / 256.0;
+    *squareMenus   = (v >> 5) & 1ULL;
+    *squareElements = (v >> 7) & 1ULL;
+    *radius = (double)((v >> 8) & 0xFFFF) / 256.0;
 }
 
 // Window border: bit63 valid · bit0 enabled · bit1 shadow · bits 8..15 size (whole points)
@@ -220,11 +217,10 @@ static inline BOOL BRBloomTest(const char *s, uint64_t lo, uint64_t hi) {
 
 #pragma mark - Publishing
 
-// Notify state is ephemeral: it only survives while some process holds the name registered, and is
-// lost on reboot/logout. So besides posting live notify state, we mirror every word into ONE
-// global-domain key (on-disk, permanent, readable by sandboxed apps at launch — same channel as
-// the lists/images). Apps launched before any live publish (e.g. right after login) read their
-// config from this snapshot instead of getting bare code defaults.
+// Notify state is ephemeral — lost on reboot/logout, only alive while some process holds it
+// registered. So besides posting live notify state, we also mirror every word into one on-disk
+// global-domain key, so an app launched before any live publish still reads real config instead
+// of bare code defaults.
 #define BR_STATE_GLOBAL_KEY CFSTR("com.tweak.brutalium.state")
 
 static inline NSMutableDictionary *br_persistAccum(void) {
@@ -278,10 +274,9 @@ static inline void BRPublishFromDefaults(NSUserDefaults *d) {
     BOOL master  = [d objectForKey:@"enabled"]         ? [d boolForKey:@"enabled"]         : YES;
     BOOL corners = [d objectForKey:@"corners.enabled"] ? [d boolForKey:@"corners.enabled"] : YES;
     BOOL toolbar = [d objectForKey:@"toolbar.enabled"] ? [d boolForKey:@"toolbar.enabled"] : YES;
-    BOOL squareLayers = [d objectForKey:@"corners.layers"] ? [d boolForKey:@"corners.layers"] : NO;
-    BOOL squareToolbar = [d objectForKey:@"corners.toolbar"] ? [d boolForKey:@"corners.toolbar"] : NO;
+    BOOL squareMenus = [d objectForKey:@"corners.menus"] ? [d boolForKey:@"corners.menus"] : NO;
+    BOOL squareElements = [d objectForKey:@"corners.elements"] ? [d boolForKey:@"corners.elements"] : NO;
     double cradius = [d floatForKey:@"corners.radius"];
-    double lyradius = [d floatForKey:@"corners.layers.radius"];
 
     BOOL lenabled = [d objectForKey:@"lights.enabled"] ? [d boolForKey:@"lights.enabled"] : YES;
     BOOL limage   = [d boolForKey:@"lights.image.enabled"];
@@ -300,7 +295,116 @@ static inline void BRPublishFromDefaults(NSUserDefaults *d) {
     else if (BRHexToRGBA(ia, &iv))                                   inact = iv;
     else                                                             inact = BR_AUTO_STATE;
 
-    BRSetState(BR_ST_WIN,    BRPackWin(master, corners, toolbar, squareLayers, squareToolbar, cradius, lyradius));
+    uint64_t winPacked = BRPackWin(master, corners, toolbar, squareMenus, squareElements, cradius);
+    BRSetState(BR_ST_WIN, winPacked);
+
+    // Menu appearance options (written to global domain, read by in-process BRRecomputeSelfExclusion).
+    BOOL menuShadow = [d objectForKey:@"corners.menus.shadow"] ? [d boolForKey:@"corners.menus.shadow"] : NO;
+    CFPreferencesSetValue(CFSTR("com.tweak.brutalium.menu.shadow"),
+                          menuShadow ? kCFBooleanTrue : kCFBooleanFalse,
+                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    uint32_t menuSelectRGBA = 0;
+    NSString *msc = [d stringForKey:@"corners.menus.selectcolor"];
+    if (msc && msc.length > 0 && [msc caseInsensitiveCompare:@"off"] != NSOrderedSame)
+        BRHexToRGBA(msc, &menuSelectRGBA);
+    CFPreferencesSetValue(CFSTR("com.tweak.brutalium.menu.selectcolor"),
+                          (__bridge CFNumberRef)@(menuSelectRGBA),
+                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    double elemRadius = [d floatForKey:@"corners.elements.radius"];
+    double menuRadius = [d floatForKey:@"corners.menus.radius"];
+    CFPreferencesSetValue(CFSTR("com.tweak.brutalium.menus.radius"),
+                          (__bridge CFNumberRef)@(menuRadius),
+                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    CFPreferencesSetValue(CFSTR("com.tweak.brutalium.elements.radius"),
+                          (__bridge CFNumberRef)@(elemRadius),
+                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    // Per-edge / per-corner border overrides
+    {
+        static NSString * const edgeKeys[4]   = { @"top", @"right", @"bottom", @"left" };
+        static NSString * const cornerKeys[4] = { @"tl", @"tr", @"br", @"bl" };
+        for (int i = 0; i < 4; i++) {
+            uint32_t ev = (uint32_t)[[d objectForKey:[NSString stringWithFormat:@"border.edge.%@", edgeKeys[i]]] unsignedLongLongValue];
+            CFPreferencesSetValue((__bridge CFStringRef)[NSString stringWithFormat:@"com.tweak.brutalium.border.edge.%@", edgeKeys[i]],
+                                  (__bridge CFNumberRef)@(ev),
+                                  kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+            BOOL eimg = [d boolForKey:[NSString stringWithFormat:@"border.edge.%@.image", edgeKeys[i]]];
+            CFPreferencesSetValue((__bridge CFStringRef)[NSString stringWithFormat:@"com.tweak.brutalium.border.edge.%@.image", edgeKeys[i]],
+                                  eimg ? kCFBooleanTrue : kCFBooleanFalse,
+                                  kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+            uint32_t cvv = (uint32_t)[[d objectForKey:[NSString stringWithFormat:@"border.corner.%@", cornerKeys[i]]] unsignedLongLongValue];
+            CFPreferencesSetValue((__bridge CFStringRef)[NSString stringWithFormat:@"com.tweak.brutalium.border.corner.%@", cornerKeys[i]],
+                                  (__bridge CFNumberRef)@(cvv),
+                                  kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+            BOOL cimg = [d boolForKey:[NSString stringWithFormat:@"border.corner.%@.image", cornerKeys[i]]];
+            CFPreferencesSetValue((__bridge CFStringRef)[NSString stringWithFormat:@"com.tweak.brutalium.border.corner.%@.image", cornerKeys[i]],
+                                  cimg ? kCFBooleanTrue : kCFBooleanFalse,
+                                  kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+        }
+    }
+    // Toolbar slim
+    CFPreferencesSetValue(CFSTR("com.tweak.brutalium.toolbar.slim"),
+                          [d boolForKey:@"toolbar.slim"] ? kCFBooleanTrue : kCFBooleanFalse,
+                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    double slimH = [d floatForKey:@"toolbar.slim.height"];
+    if (slimH <= 0) slimH = 36.0;
+    CFPreferencesSetValue(CFSTR("com.tweak.brutalium.toolbar.slim.height"),
+                          (__bridge CFNumberRef)@(slimH),
+                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    double slimPct = [d floatForKey:@"toolbar.slim.radius"];
+    if (slimPct <= 0) slimPct = 5.0;
+    CFPreferencesSetValue(CFSTR("com.tweak.brutalium.toolbar.slim.radius"),
+                          (__bridge CFNumberRef)@(slimPct),
+                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    // Dock flat background + corner radius
+    CFPreferencesSetValue(CFSTR("com.tweak.brutalium.dock.flat"),
+                          [d boolForKey:@"dock.flat"] ? kCFBooleanTrue : kCFBooleanFalse,
+                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    uint32_t dockRGBA = 0x1C1C1EE6;
+    BRHexToRGBA([d stringForKey:@"dock.color"], &dockRGBA);
+    CFPreferencesSetValue(CFSTR("com.tweak.brutalium.dock.color"),
+                          (__bridge CFNumberRef)@(dockRGBA),
+                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    double dockRadius = [d floatForKey:@"dock.radius"];
+    if (dockRadius < 0) dockRadius = 0.0;
+    CFPreferencesSetValue(CFSTR("com.tweak.brutalium.dock.radius"),
+                          (__bridge CFNumberRef)@(dockRadius),
+                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    CFPreferencesSetValue(CFSTR("com.tweak.brutalium.dock.border"),
+                          [d boolForKey:@"dock.border"] ? kCFBooleanTrue : kCFBooleanFalse,
+                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    uint32_t dockBorderRGBA = 0xFFFFFFFF;
+    BRHexToRGBA([d stringForKey:@"dock.border.color"], &dockBorderRGBA);
+    CFPreferencesSetValue(CFSTR("com.tweak.brutalium.dock.border.color"),
+                          (__bridge CFNumberRef)@(dockBorderRGBA),
+                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    double dockBorderSize = [d floatForKey:@"dock.border.size"];
+    if (dockBorderSize < 0) dockBorderSize = 1.0;
+    CFPreferencesSetValue(CFSTR("com.tweak.brutalium.dock.border.size"),
+                          (__bridge CFNumberRef)@(dockBorderSize),
+                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    // Sidebar tint + squaring
+    CFPreferencesSetValue(CFSTR("com.tweak.brutalium.sidebar.tint"),
+                          [d boolForKey:@"sidebar.tint.enabled"] ? kCFBooleanTrue : kCFBooleanFalse,
+                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    NSString *sbColorStr = [d stringForKey:@"sidebar.tint.color"];
+    if (sbColorStr && ![sbColorStr isEqualToString:@"auto"]) {
+        uint32_t sbRGBA = 0x1E1E28FF;
+        BRHexToRGBA(sbColorStr, &sbRGBA);
+        CFPreferencesSetValue(CFSTR("com.tweak.brutalium.sidebar.tint.color"),
+                              (__bridge CFNumberRef)@(sbRGBA),
+                              kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    } else {
+        CFPreferencesSetValue(CFSTR("com.tweak.brutalium.sidebar.tint.color"), NULL,
+                              kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    }
+    CFPreferencesSetValue(CFSTR("com.tweak.brutalium.sidebar.corners"),
+                          [d boolForKey:@"sidebar.corners"] ? kCFBooleanTrue : kCFBooleanFalse,
+                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    double sidebarRadius = [d floatForKey:@"sidebar.corners.radius"];
+    if (sidebarRadius < 0) sidebarRadius = 0.0;
+    CFPreferencesSetValue(CFSTR("com.tweak.brutalium.sidebar.corners.radius"),
+                          (__bridge CFNumberRef)@(sidebarRadius),
+                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
     BRSetState(BR_ST_LFLAGS, BRPackLFlags(lenabled, limage, lradius, lsize));
     BRSetState(BR_ST_LCLOSE, close);
     BRSetState(BR_ST_LMIN,   mn);
@@ -330,6 +434,9 @@ static inline void BRPublishFromDefaults(NSUserDefaults *d) {
     BRSetState(BR_ST_TCOLOR,  tColor);
     BRSetState(BR_ST_TCHROME, tChrome); // 0 + chromeAuto flag ⇒ derive in the dylib
     BRSetState(BR_ST_TTEXT,   tText);   // applied only when textAuto is off
+    uint32_t tAccent = 0;               // 0 ⇒ auto: leave the system accent untouched
+    if (!BRHexToRGBA([d stringForKey:@"tint.accent"], &tAccent)) tAccent = 0;
+    BRSetState(BR_ST_TACCENT, tAccent);
 
     // Per-app lists travel via ONE global-domain key (readable by every app at launch,
     // sandboxed or not — same channel as AppleInterfaceStyle) rather than notify Bloom
@@ -373,6 +480,7 @@ static inline void BRPublishFromDefaults(NSUserDefaults *d) {
     uint32_t tbRGBA = 0x1E1E28FF;
     { uint32_t v; if (BRHexToRGBA(tbcol, &v)) tbRGBA = v; }
     BRSetState(BR_ST_TBAR, BRPackTbar(tbEnabled, tbImage, tbRGBA));
+
 
     // Images (base64 PNGs, downscaled by the CLI) are too big for notify words, so the whole
     // { role : base64 } registry rides one global-domain key — the same launch-readable channel

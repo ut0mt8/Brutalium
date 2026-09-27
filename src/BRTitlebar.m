@@ -72,45 +72,47 @@ void BRTitlebarApplyColor(NSWindow *w) {
     NSView *frame = w.contentView.superview;
     if (!frame) return;
     const char *fn = class_getName([frame class]);
-    if (!fn || !strstr(fn, "ThemeFrame")) return;               // standard windows only
+    if (!fn || !strstr(fn, "ThemeFrame")) return;
 
     NSView *container = FindContaining(frame, "TitlebarContainer");
     if (!container) return;
     NSView *titlebar = FindByClass(container, "NSTitlebarView");
     if (!titlebar) return;
 
+    // --- Titlebar strip ---
     static const void *kBar = &kBar;
     BRBar *bar = objc_getAssociatedObject(titlebar, kBar);
 
-    if (!BRTitlebarColorActive()) {                             // disabled → restore
+    if (!BRTitlebarColorActive()) {
         if (bar) { [bar removeFromSuperview]; objc_setAssociatedObject(titlebar, kBar, nil, OBJC_ASSOCIATION_RETAIN); }
-        return;
+    } else {
+        NSRect strip = BRStripRect(w, titlebar);
+        if (!bar) {
+            bar = [[BRBar alloc] initWithFrame:strip];
+            bar.wantsLayer = YES;
+            bar.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin;
+            NSView *title = FindByClass(titlebar, "NSTextField");
+            if (title) [titlebar addSubview:bar positioned:NSWindowBelow relativeTo:title];
+            else {
+                NSView *bg = FindContaining(titlebar, "TitlebarBackground");
+                if (bg) [titlebar addSubview:bar positioned:NSWindowAbove relativeTo:bg];
+                else    [titlebar addSubview:bar positioned:NSWindowBelow relativeTo:nil];
+            }
+            objc_setAssociatedObject(titlebar, kBar, bar, OBJC_ASSOCIATION_RETAIN);
+        }
+        bar.frame = strip;
+        CGImageRef tbimg = BRImageForRole(@"titlebar");
+        if (gTitlebarImageEnabled && tbimg) {
+            bar.layer.contents = (__bridge id)tbimg;
+            bar.layer.contentsGravity = kCAGravityResizeAspectFill;
+            bar.layer.contentsScale = w.backingScaleFactor > 0.0 ? w.backingScaleFactor : 2.0;
+            bar.layer.masksToBounds = YES;
+            bar.layer.backgroundColor = gTitlebarColorObj.CGColor;
+        } else {
+            bar.layer.contents = nil;
+            bar.layer.backgroundColor = gTitlebarColorObj.CGColor;
+        }
     }
 
-    NSRect strip = BRStripRect(w, titlebar);
-    if (!bar) {
-        bar = [[BRBar alloc] initWithFrame:strip];
-        bar.wantsLayer = YES;
-        bar.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin;   // full width, pinned to top strip
-        NSView *title = FindByClass(titlebar, "NSTextField");           // in front of all backdrops
-        if (title) [titlebar addSubview:bar positioned:NSWindowBelow relativeTo:title];
-        else {
-            NSView *bg = FindContaining(titlebar, "TitlebarBackground");
-            if (bg) [titlebar addSubview:bar positioned:NSWindowAbove relativeTo:bg];
-            else    [titlebar addSubview:bar positioned:NSWindowBelow relativeTo:nil];
-        }
-        objc_setAssociatedObject(titlebar, kBar, bar, OBJC_ASSOCIATION_RETAIN);
-    }
-    bar.frame = strip;
-    CGImageRef tbimg = BRImageForRole(@"titlebar");
-    if (gTitlebarImageEnabled && tbimg) {
-        bar.layer.contents = (__bridge id)tbimg;
-        bar.layer.contentsGravity = kCAGravityResizeAspectFill;   // fill the strip, crop overflow
-        bar.layer.contentsScale = w.backingScaleFactor > 0.0 ? w.backingScaleFactor : 2.0;
-        bar.layer.masksToBounds = YES;
-        bar.layer.backgroundColor = gTitlebarColorObj.CGColor;     // shows through any transparency
-    } else {
-        bar.layer.contents = nil;
-        bar.layer.backgroundColor = gTitlebarColorObj.CGColor;
-    }
 }
+

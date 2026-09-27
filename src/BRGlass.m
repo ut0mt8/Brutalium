@@ -61,19 +61,27 @@ static void BRGlassApplyToView(NSView *gv) {
     }
     if (!holder || !holder.layer) return;
 
-    if (BRGlassActive()) {
+    // The sidebar's chrome is glass-based (not NSVisualEffectView), so its own tint/radius
+    // overrides live here, not in BRTint.m. A sidebar tint override should work whether or not
+    // the user has also turned on general glass flattening, so it gets its own trigger below.
+    BOOL isSidebar = BRIsSidebarView(gv);
+    BOOL sidebarWantsOwnColor = isSidebar && gSidebarTintEnabled && !gSidebarTintAuto;
+    BOOL shouldPaint = BRGlassActive() || sidebarWantsOwnColor;
+
+    if (shouldPaint) {
         double cr = 0;
         @try { cr = [[gv valueForKey:@"cornerRadius"] doubleValue]; } @catch (__unused NSException *e) {}
 
         CGImageRef img = gGlassImageEnabled ? BRImageForRole(@"glass") : NULL;
-        if (img) {
+        if (img && !sidebarWantsOwnColor) {
             CGColorRef pat = BRTilePatternColor(img);    // tiles at the image's native size
             holder.layer.contents        = nil;
             holder.layer.backgroundColor = pat;          // layer retains it
             if (pat) CGColorRelease(pat);
         } else {
             __block CGColorRef cg = NULL;
-            NSColor *col = gGlassColorObj ?: [NSColor windowBackgroundColor];
+            NSColor *col = sidebarWantsOwnColor ? BRMakeColor(gSidebarTintRGBA)
+                                                 : (gGlassColorObj ?: [NSColor windowBackgroundColor]);
             if (@available(macOS 11.0, *))
                 [gv.effectiveAppearance performAsCurrentDrawingAppearance:^{ cg = col.CGColor; }];
             else
@@ -81,11 +89,14 @@ static void BRGlassApplyToView(NSView *gv) {
             holder.layer.contents = nil;
             holder.layer.backgroundColor = cg;
         }
+        // Sidebar corners, if explicitly set, take priority over the general elements radius.
+        if (gSidebarCornersEnabled && isSidebar) cr = (double)gSidebarCornersRadius;
+        else if (BRSquareElementsActive()) cr = (double)BRElementsRadiusEffective();
         holder.layer.cornerRadius    = cr;
         holder.layer.masksToBounds   = (cr > 0.0);
         objc_setAssociatedObject(holder, kBRGlassPainted, @YES, OBJC_ASSOCIATION_RETAIN);
     } else if (objc_getAssociatedObject(holder, kBRGlassPainted)) {
-        // feature turned off after we painted — restore the see-through glass
+        // neither glass flatten nor a sidebar override applies any more — restore the see-through glass
         holder.layer.contents        = nil;
         holder.layer.backgroundColor = NULL;
         holder.layer.masksToBounds   = NO;
