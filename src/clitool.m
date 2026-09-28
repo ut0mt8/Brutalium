@@ -127,7 +127,7 @@ static void usage(void) {
         "  tint exclude add | remove | list <bundleid>\n"
         "\n"
         "glass:\n"
-        "  glass off | on\n"
+        "  glass on | off\n"
         "  glass color <#RRGGBB|auto>\n"
         "  glass image <path|off>\n"
         "  glass exclude add | remove | list <bundleid>\n"
@@ -532,8 +532,8 @@ int main(int argc, const char *argv[]) {
         // --- glass ---
         else if (strcmp(cmd, "glass") == 0 && argc >= 3) {
             const char *sub = argv[2];
-            if (strcmp(sub, "off") == 0)  [d setBool:YES forKey:@"glass.flatten"];
-            else if (strcmp(sub, "on") == 0) [d setBool:NO forKey:@"glass.flatten"];
+            if (strcmp(sub, "on") == 0)  [d setBool:YES forKey:@"glass.flatten"];
+            else if (strcmp(sub, "off") == 0) [d setBool:NO forKey:@"glass.flatten"];
             else if (strcmp(sub, "color") == 0 && argc >= 4) [d setObject:[NSString stringWithUTF8String:argv[3]] forKey:@"glass.color"];
             else if (strcmp(sub, "image") == 0 && argc >= 4) {
                 if (strcmp(argv[3], "off") == 0) {
