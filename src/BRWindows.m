@@ -773,12 +773,60 @@ static NSToolbarSizeMode br_slim_sizeMode(id self, SEL _cmd) {
     return orig_sizeMode ? orig_sizeMode(self, _cmd) : NSToolbarSizeModeRegular;
 }
 
-// Clamp the glass capsule (NSToolbarPlatterView) height — the glass fills the platter, so it shrinks
-// along with it.
+// On the new Golden Gate build the system sizes the capsule itself (24pt at toolbar height 40)
+// while the item viewer inside it stays full toolbar height, so the glyph ends up outside the
+// capsule's clipping view. Force the capsule to our own target (slim height minus 8) instead, and
+// centre it vertically in the strip with the origin hooks below.
 static void (*orig_platterSetFrameSize)(id, SEL, NSSize) = NULL;
 static void br_slim_platterSetFrameSize(id self, SEL _cmd, NSSize size) {
-    if (BRSlimToolbarActive() && size.height > BRSlimPlatterHeight()) size.height = BRSlimPlatterHeight();
+    if (BRSlimToolbarActive()) size.height = BRSlimPlatterHeight();
     if (orig_platterSetFrameSize) orig_platterSetFrameSize(self, _cmd, size);
+}
+
+// The system still positions each capsule as if the glass container were its old size (y=-4 in a
+// 28pt container), so once we force the container back to the full strip height the capsule sits
+// against one edge. Centre it vertically in the strip. Only the incoming frame argument is changed
+// (same pattern as the size clamp above) — no other view's frame is touched.
+static void (*orig_platterSetFrame)(id, SEL, NSRect) = NULL;
+static void br_slim_platterSetFrame(id self, SEL _cmd, NSRect frame) {
+    if (BRSlimToolbarActive()) {
+        frame.size.height = BRSlimPlatterHeight();
+        frame.origin.y = floor(((CGFloat)gSlimToolbarHeight - frame.size.height) / 2.0);
+    }
+    if (orig_platterSetFrame) orig_platterSetFrame(self, _cmd, frame);
+}
+
+// Same centring for the case where the system moves the capsule with a plain origin change
+// (position only, no size change), which never goes through setFrame:.
+static void (*orig_platterSetFrameOrigin)(id, SEL, NSPoint) = NULL;
+static void br_slim_platterSetFrameOrigin(id self, SEL _cmd, NSPoint origin) {
+    if (BRSlimToolbarActive())
+        origin.y = floor(((CGFloat)gSlimToolbarHeight - BRSlimPlatterHeight()) / 2.0);
+    if (orig_platterSetFrameOrigin) orig_platterSetFrameOrigin(self, _cmd, origin);
+}
+
+// The item viewer inside each capsule is still positioned by the system for the old capsule height,
+// so the glyph lands off-centre (centre ~12pt too low at slim height 40). Centre the viewer in its
+// capsule. Only viewers that actually sit inside a capsule are touched — the spacer viewers live
+// directly in the glass container and must be left alone.
+static BOOL BRSlimViewerInPlatter(NSView *v) {
+    NSView *cur = v.superview;
+    for (int depth = 0; cur && depth < 5; depth++, cur = cur.superview) {
+        if (strstr(class_getName(object_getClass(cur)), "NSToolbarPlatterView")) return YES;
+    }
+    return NO;
+}
+static void (*orig_viewerSetFrame)(id, SEL, NSRect) = NULL;
+static void br_slim_viewerSetFrame(id self, SEL _cmd, NSRect frame) {
+    if (BRSlimToolbarActive() && BRSlimViewerInPlatter((NSView *)self))
+        frame.origin.y = floor((BRSlimPlatterHeight() - frame.size.height) / 2.0);
+    if (orig_viewerSetFrame) orig_viewerSetFrame(self, _cmd, frame);
+}
+static void (*orig_viewerSetFrameOrigin)(id, SEL, NSPoint) = NULL;
+static void br_slim_viewerSetFrameOrigin(id self, SEL _cmd, NSPoint origin) {
+    if (BRSlimToolbarActive() && BRSlimViewerInPlatter((NSView *)self))
+        origin.y = floor((BRSlimPlatterHeight() - ((NSView *)self).frame.size.height) / 2.0);
+    if (orig_viewerSetFrameOrigin) orig_viewerSetFrameOrigin(self, _cmd, origin);
 }
 
 // Clamp the toolbar strip itself so there's no dead space around the shrunken platters.
@@ -788,10 +836,11 @@ static void br_slim_toolbarViewSetFrameSize(id self, SEL _cmd, NSSize size) {
     if (orig_toolbarViewSetFrameSize) orig_toolbarViewSetFrameSize(self, _cmd, size);
 }
 
-// Clamp the full-width glass underlay (NSGlassContainerView) to match the toolbar strip.
+// EXPERIMENT: force the full-width glass underlay to exactly the toolbar strip height. The system
+// now shrinks it further (28pt at toolbar height 40), which leaves the item viewers overhanging it.
 static void (*orig_glassContainerSetFrameSize)(id, SEL, NSSize) = NULL;
 static void br_slim_glassContainerSetFrameSize(id self, SEL _cmd, NSSize size) {
-    if (BRSlimToolbarActive() && size.height > (CGFloat)gSlimToolbarHeight) size.height = (CGFloat)gSlimToolbarHeight;
+    if (BRSlimToolbarActive()) size.height = (CGFloat)gSlimToolbarHeight;
     if (orig_glassContainerSetFrameSize) orig_glassContainerSetFrameSize(self, _cmd, size);
 }
 
@@ -884,6 +933,34 @@ static void BRSlimSwizzleSetFrameSize(const char *clsName, void (**origSlot)(id,
            method_setImplementation(own, newImp); }
 }
 
+static void BRSlimSwizzleSetFrame(const char *clsName, void (**origSlot)(id, SEL, NSRect), IMP newImp) {
+    Class c = objc_getClass(clsName);
+    if (!c) return;
+    SEL sel = @selector(setFrame:);
+    Method m = class_getInstanceMethod(c, sel);
+    if (!m) return;
+    const char *types = method_getTypeEncoding(m);
+    IMP inherited = method_getImplementation(m);
+    if (class_addMethod(c, sel, newImp, types)) *origSlot = (void (*)(id, SEL, NSRect))inherited;
+    else { Method own = class_getInstanceMethod(c, sel);
+           *origSlot = (void (*)(id, SEL, NSRect))method_getImplementation(own);
+           method_setImplementation(own, newImp); }
+}
+
+static void BRSlimSwizzleSetFrameOrigin(const char *clsName, void (**origSlot)(id, SEL, NSPoint), IMP newImp) {
+    Class c = objc_getClass(clsName);
+    if (!c) return;
+    SEL sel = @selector(setFrameOrigin:);
+    Method m = class_getInstanceMethod(c, sel);
+    if (!m) return;
+    const char *types = method_getTypeEncoding(m);
+    IMP inherited = method_getImplementation(m);
+    if (class_addMethod(c, sel, newImp, types)) *origSlot = (void (*)(id, SEL, NSPoint))inherited;
+    else { Method own = class_getInstanceMethod(c, sel);
+           *origSlot = (void (*)(id, SEL, NSPoint))method_getImplementation(own);
+           method_setImplementation(own, newImp); }
+}
+
 static void BRSlimSwizzleLayout(const char *clsName, void (**origSlot)(id, SEL), IMP newImp) {
     Class c = objc_getClass(clsName);
     if (!c) return;
@@ -905,6 +982,10 @@ static void BRSlimToolbarArm(void) {
         method_setImplementation(m, (IMP)br_slim_sizeMode);
     }
     BRSlimSwizzleSetFrameSize("NSToolbarPlatterView", &orig_platterSetFrameSize, (IMP)br_slim_platterSetFrameSize);
+    BRSlimSwizzleSetFrame("NSToolbarPlatterView", &orig_platterSetFrame, (IMP)br_slim_platterSetFrame);
+    BRSlimSwizzleSetFrameOrigin("NSToolbarPlatterView", &orig_platterSetFrameOrigin, (IMP)br_slim_platterSetFrameOrigin);
+    BRSlimSwizzleSetFrame("NSToolbarItemViewer", &orig_viewerSetFrame, (IMP)br_slim_viewerSetFrame);
+    BRSlimSwizzleSetFrameOrigin("NSToolbarItemViewer", &orig_viewerSetFrameOrigin, (IMP)br_slim_viewerSetFrameOrigin);
     BRSlimSwizzleSetFrameSize("NSToolbarView", &orig_toolbarViewSetFrameSize, (IMP)br_slim_toolbarViewSetFrameSize);
     BRSlimSwizzleSetFrameSize("NSGlassContainerView", &orig_glassContainerSetFrameSize, (IMP)br_slim_glassContainerSetFrameSize);
     BRSlimSwizzleLayout("NSToolbarItemViewer", &orig_viewerLayout, (IMP)br_slim_viewerLayout);
